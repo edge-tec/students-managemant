@@ -1,5 +1,12 @@
 import prisma from "@/lib/db/prisma";
-import { ExamCategoryType, ExamMode, ExamSessionStatus, DifficultyLevel, ContentStatus } from "@prisma/client";
+import {
+  ExamCategoryType,
+  ExamMode,
+  ExamSessionStatus,
+  DifficultyLevel,
+  ContentStatus,
+  SubscriptionStatus,
+} from "@prisma/client";
 
 export interface CreateExamParams {
   studentId: string;
@@ -11,6 +18,7 @@ export interface CreateExamParams {
   durationMinutes: number;
   difficulty: "EASY" | "MEDIUM" | "HARD" | "MIXED";
   mode: ExamMode;
+  adaptive?: boolean;
 }
 
 export interface SubmitExamParams {
@@ -25,7 +33,145 @@ export interface SubmitExamParams {
 
 export class ExamService {
   /**
-   * Builds and persists a new server-authoritative exam session with selected questions.
+   * Lists available Exam Templates (Live Model Tests, Past Board Papers)
+   */
+  static async listExamTemplates(params?: {
+    category?: ExamCategoryType;
+    isPremium?: boolean;
+    studentId?: string;
+  }) {
+    const { category, isPremium, studentId } = params || {};
+
+    const templates = await prisma.examTemplate.findMany({
+      where: {
+        isPublished: true,
+        ...(category ? { category } : {}),
+        ...(isPremium !== undefined ? { isPremium } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        sessions: {
+          where: studentId
+            ? { studentId, status: ExamSessionStatus.EVALUATED }
+            : { id: "none" },
+          include: { result: true },
+          orderBy: { submittedAt: "desc" },
+          take: 1,
+        },
+        _count: { select: { sessions: true } },
+      },
+    });
+
+    return templates.map((t) => {
+      const studentSession = t.sessions?.[0];
+      return {
+        id: t.id,
+        titleBn: t.titleBn,
+        titleEn: t.titleEn,
+        category: t.category,
+        subjectId: t.subjectId,
+        durationMinutes: t.durationMinutes,
+        totalMarks: t.totalMarks,
+        negativeMarks: t.negativeMarks,
+        questionCount: t.questionCount,
+        isPremium: t.isPremium,
+        mode: t.mode,
+        instructionsBn: t.instructionsBn,
+        instructionsEn: t.instructionsEn,
+        totalAttempts: t._count?.sessions || 0,
+        studentBestScore: studentSession?.result?.totalScore ?? null,
+        isAttempted: Boolean(studentSession),
+        lastAttemptSessionId: studentSession?.id ?? null,
+      };
+    });
+  }
+
+  /**
+   * Starts a new exam session from an existing ExamTemplate (Live Model Test or Past Board Paper).
+   */
+  static async createExamFromTemplate(templateId: string, studentId: string) {
+    const template = await prisma.examTemplate.findUnique({
+      where: { id: templateId },
+    });
+
+    if (!template || !template.isPublished) {
+      throw new Error("Exam template not found or unpublished.");
+    }
+
+    // Check premium access if required
+    if (template.isPremium) {
+      const sub = await prisma.subscription.findFirst({
+        where: {
+          studentId,
+          status: SubscriptionStatus.ACTIVE,
+          endDate: { gte: new Date() },
+        },
+      });
+      if (!sub) {
+        throw new Error("This model test requires an active premium subscription.");
+      }
+    }
+
+    // Fetch questions matching template category & subject
+    const whereClause: Record<string, unknown> = {
+      category: template.category,
+      status: ContentStatus.PUBLISHED,
+    };
+    if (template.subjectId) {
+      whereClause.subjectId = template.subjectId;
+    }
+
+    const eligibleQuestions = await prisma.question.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        marks: true,
+        negativeMarks: true,
+      },
+    });
+
+    if (eligibleQuestions.length === 0) {
+      throw new Error("No published questions available for this exam template.");
+    }
+
+    const shuffled = [...eligibleQuestions].sort(() => 0.5 - Math.random());
+    const selectedQuestions = shuffled.slice(0, Math.min(template.questionCount, shuffled.length));
+
+    const serverStartTime = new Date();
+    const serverDeadline = new Date(serverStartTime.getTime() + template.durationMinutes * 60 * 1000);
+
+    const defaultCorrectMark = selectedQuestions[0]?.marks ?? 1.0;
+    const defaultNegativeMark = template.negativeMarks ?? 0.25;
+
+    return prisma.$transaction(async (tx) => {
+      const session = await tx.examSession.create({
+        data: {
+          studentId,
+          templateId: template.id,
+          category: template.category,
+          mode: template.mode,
+          status: ExamSessionStatus.IN_PROGRESS,
+          durationMinutes: template.durationMinutes,
+          serverStartTime,
+          serverDeadline,
+          correctMark: defaultCorrectMark,
+          negativeMark: defaultNegativeMark,
+          totalQuestions: selectedQuestions.length,
+          sessionQuestions: {
+            create: selectedQuestions.map((q, idx) => ({
+              questionId: q.id,
+              orderIndex: idx + 1,
+            })),
+          },
+        },
+      });
+
+      return session;
+    });
+  }
+
+  /**
+   * Builds and persists a custom exam session with adaptive knowledge-gap targeting.
    */
   static async createCustomExam(params: CreateExamParams) {
     const {
@@ -38,9 +184,9 @@ export class ExamService {
       durationMinutes,
       difficulty,
       mode,
+      adaptive = false,
     } = params;
 
-    // Build Prisma where query for questions
     const whereClause: Record<string, unknown> = {
       category,
       subjectId,
@@ -59,6 +205,21 @@ export class ExamService {
       whereClause.difficulty = difficulty as DifficultyLevel;
     }
 
+    // Adaptive Mode: Prioritize student's previously unmastered wrong questions
+    let priorityQuestionIds: string[] = [];
+    if (adaptive && studentId) {
+      const unmastered = await prisma.wrongQuestion.findMany({
+        where: {
+          studentId,
+          isMastered: false,
+          question: whereClause,
+        },
+        select: { questionId: true },
+        take: Math.floor(questionCount * 0.5), // up to 50% from mistakes
+      });
+      priorityQuestionIds = unmastered.map((w) => w.questionId);
+    }
+
     // Fetch eligible questions with options
     const eligibleQuestions = await prisma.question.findMany({
       where: whereClause,
@@ -73,9 +234,14 @@ export class ExamService {
       throw new Error("No published questions found matching your criteria.");
     }
 
-    // Shuffle and pick requested count
-    const shuffled = [...eligibleQuestions].sort(() => 0.5 - Math.random());
-    const selectedQuestions = shuffled.slice(0, Math.min(questionCount, shuffled.length));
+    const prioritySet = new Set(priorityQuestionIds);
+    const prioritizedPool = eligibleQuestions.filter((q) => prioritySet.has(q.id));
+    const regularPool = eligibleQuestions
+      .filter((q) => !prioritySet.has(q.id))
+      .sort(() => 0.5 - Math.random());
+
+    const neededRegular = questionCount - prioritizedPool.length;
+    const selectedQuestions = [...prioritizedPool, ...regularPool.slice(0, Math.max(0, neededRegular))];
 
     const serverStartTime = new Date();
     const serverDeadline = new Date(serverStartTime.getTime() + durationMinutes * 60 * 1000);
@@ -83,7 +249,6 @@ export class ExamService {
     const defaultCorrectMark = selectedQuestions[0]?.marks ?? 1.0;
     const defaultNegativeMark = selectedQuestions[0]?.negativeMarks ?? 0.25;
 
-    // Create ExamSession and link session questions inside transaction
     const session = await prisma.$transaction(async (tx) => {
       const newSession = await tx.examSession.create({
         data: {
@@ -115,7 +280,13 @@ export class ExamService {
   /**
    * Autosaves student answer for a single question.
    */
-  static async saveAnswer(sessionId: string, studentId: string, questionId: string, selectedOption: string | null, timeSpentSec: number) {
+  static async saveAnswer(
+    sessionId: string,
+    studentId: string,
+    questionId: string,
+    selectedOption: string | null,
+    timeSpentSec: number
+  ) {
     const session = await prisma.examSession.findFirst({
       where: { id: sessionId, studentId },
     });
@@ -126,6 +297,16 @@ export class ExamService {
 
     if (session.status === ExamSessionStatus.SUBMITTED || session.status === ExamSessionStatus.EVALUATED) {
       throw new Error("Exam has already been submitted");
+    }
+
+    // Server deadline enforcement: Grace period of 15 seconds
+    const graceMs = 15000;
+    if (Date.now() > new Date(session.serverDeadline).getTime() + graceMs) {
+      await prisma.examSession.update({
+        where: { id: sessionId },
+        data: { status: ExamSessionStatus.EXPIRED },
+      });
+      throw new Error("Exam time has expired.");
     }
 
     // Upsert student answer
@@ -153,7 +334,7 @@ export class ExamService {
   }
 
   /**
-   * Evaluates and finalizes an exam submission.
+   * Evaluates and finalizes an exam submission with cohort ranking & percentile calculations.
    */
   static async submitAndEvaluateExam(params: SubmitExamParams) {
     const { sessionId, studentId, answers } = params;
@@ -267,7 +448,25 @@ export class ExamService {
         },
       });
 
-      // 3. Create ExamResult
+      // 3. Compute Cohort Ranking & Percentile
+      let cohortWhere: Record<string, unknown> = {
+        session: { category: session.category },
+      };
+      if (session.templateId) {
+        cohortWhere = { session: { templateId: session.templateId } };
+      }
+
+      const otherResults = await tx.examResult.findMany({
+        where: cohortWhere,
+        select: { totalScore: true },
+      });
+
+      const higherScoresCount = otherResults.filter((r) => r.totalScore > finalScore).length;
+      const cohortSize = otherResults.length + 1;
+      const rankInCohort = higherScoresCount + 1;
+      const percentile = Math.round(((cohortSize - rankInCohort + 1) / cohortSize) * 1000) / 10;
+
+      // 4. Create ExamResult
       const result = await tx.examResult.create({
         data: {
           sessionId,
@@ -279,12 +478,15 @@ export class ExamService {
           unansweredCount,
           accuracyPct,
           timeSpentSec: totalTimeSpent,
+          rankInCohort,
+          cohortSize,
+          percentile,
           subjectBreakdownJson: JSON.stringify(subjectStats),
           chapterBreakdownJson: JSON.stringify(chapterStats),
         },
       });
 
-      // 4. Automatically save wrong answers to student's WrongQuestion notebook
+      // 5. Automatically save wrong answers to student's WrongQuestion notebook
       for (const wqId of wrongQuestionIds) {
         await tx.wrongQuestion.upsert({
           where: {
@@ -307,7 +509,7 @@ export class ExamService {
         });
       }
 
-      // 5. Update study activity and streak
+      // 6. Update study activity and streak
       await tx.studyActivity.create({
         data: {
           studentId,
@@ -316,7 +518,7 @@ export class ExamService {
         },
       });
 
-      // Streak update
+      // 7. Streak update
       const existingStreak = await tx.studyStreak.findUnique({
         where: { studentId },
       });
@@ -357,5 +559,83 @@ export class ExamService {
 
       return { session, result, alreadyEvaluated: false };
     });
+  }
+
+  /**
+   * Retrieves real-time merit list / leaderboard for an ExamTemplate or Category.
+   */
+  static async getExamLeaderboard(params: { templateId?: string; category?: ExamCategoryType; limit?: number }) {
+    const { templateId, category, limit = 10 } = params;
+
+    const where: Record<string, unknown> = {};
+    if (templateId) {
+      where.session = { templateId };
+    } else if (category) {
+      where.session = { category };
+    }
+
+    const topResults = await prisma.examResult.findMany({
+      where,
+      orderBy: [{ totalScore: "desc" }, { timeSpentSec: "asc" }],
+      take: limit,
+      include: {
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            fullNameBn: true,
+            avatarUrl: true,
+          },
+        },
+        session: {
+          select: {
+            category: true,
+            mode: true,
+            template: { select: { titleBn: true, titleEn: true } },
+          },
+        },
+      },
+    });
+
+    return topResults.map((r, idx) => ({
+      rank: idx + 1,
+      studentName: r.student.fullNameBn || r.student.fullName,
+      avatarUrl: r.student.avatarUrl,
+      score: r.totalScore,
+      maxMarks: r.maxMarks,
+      accuracyPct: r.accuracyPct,
+      timeSpentSec: r.timeSpentSec,
+      examTitle: r.session.template?.titleBn || `${r.session.category} মডেল টেস্ট`,
+      evaluatedAt: r.evaluatedAt,
+    }));
+  }
+
+  /**
+   * Retrieves a student's past completed exam sessions.
+   */
+  static async getStudentExamHistory(studentId: string, limit = 15) {
+    const sessions = await prisma.examSession.findMany({
+      where: {
+        studentId,
+        status: ExamSessionStatus.EVALUATED,
+      },
+      orderBy: { submittedAt: "desc" },
+      take: limit,
+      include: {
+        result: true,
+        template: { select: { titleBn: true, titleEn: true } },
+      },
+    });
+
+    return sessions.map((s) => ({
+      id: s.id,
+      category: s.category,
+      mode: s.mode,
+      durationMinutes: s.durationMinutes,
+      totalQuestions: s.totalQuestions,
+      submittedAt: s.submittedAt,
+      templateTitle: s.template?.titleBn || null,
+      result: s.result,
+    }));
   }
 }

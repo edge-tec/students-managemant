@@ -8,7 +8,6 @@ import {
   BookOpen,
   Clock,
   HelpCircle,
-  ShieldCheck,
   Check,
   AlertCircle,
   Play,
@@ -36,6 +35,7 @@ function CustomExamBuilderContent() {
   const [durationMinutes, setDurationMinutes] = useState(20);
   const [difficulty, setDifficulty] = useState("MIXED");
   const [mode, setMode] = useState<"REAL_EXAM" | "PRACTICE">("REAL_EXAM");
+  const [adaptive, setAdaptive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -105,6 +105,7 @@ function CustomExamBuilderContent() {
           durationMinutes: Number(durationMinutes),
           difficulty,
           mode,
+          adaptive,
         }),
       });
 
@@ -363,6 +364,38 @@ function CustomExamBuilderContent() {
               </p>
             </button>
           </div>
+        </div>
+
+        {/* Step 6: Adaptive Mistakes Targeting */}
+        <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm text-indigo-950">
+                {locale === "bn" ? "অ্যাডাপ্টিভ মোড (পূর্বের ভুল প্রশ্নসমূহ অগ্রাধিকার পাবে)" : "Adaptive Mode (Target Mistakes)"}
+              </span>
+              <span className="text-[10px] bg-indigo-200 text-indigo-800 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                GAP-TARGETING
+              </span>
+            </div>
+            <p className="text-xs text-indigo-800/80">
+              {locale === "bn"
+                ? "সক্রিয় থাকলে আপনার ভুলের খাতা থেকে পূর্বে ভুল করা প্রশ্নগুলো সর্বোচ্চ ৫০% পর্যন্ত স্থান পাবে।"
+                : "When enabled, prioritizes up to 50% of questions from your unmastered mistakes notebook."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAdaptive(!adaptive)}
+            className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+              adaptive ? "bg-indigo-600" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`block w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                adaptive ? "translate-x-6" : "translate-x-0.5"
+              }`}
+            />
+          </button>
         </div>
 
         {/* Submit Button */}

@@ -23,6 +23,7 @@ export const CustomExamCreateSchema = z.object({
   difficulty: z.enum(["EASY", "MEDIUM", "HARD", "MIXED"]).default("MIXED"),
   mode: z.enum(["PRACTICE", "REAL_EXAM"]).default("REAL_EXAM"),
   source: z.enum(["ALL", "BOARD", "ADMISSION"]).default("ALL"),
+  adaptive: z.boolean().optional(),
 });
 
 export const AnswerSaveSchema = z.object({

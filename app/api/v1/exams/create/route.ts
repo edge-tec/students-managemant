@@ -12,8 +12,19 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const parsed = CustomExamCreateSchema.safeParse(body);
 
+    // 1. Template-based Exam Session (Model Tests & Past Board Papers)
+    if (body.templateId) {
+      const session = await ExamService.createExamFromTemplate(body.templateId, user.id);
+      return NextResponse.json({
+        message: "Exam session created successfully from template",
+        sessionId: session.id,
+        session,
+      }, { status: 201 });
+    }
+
+    // 2. Custom & Adaptive Exam Session
+    const parsed = CustomExamCreateSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: "Validation failed", details: parsed.error.format() }, { status: 400 });
     }
@@ -30,6 +41,7 @@ export async function POST(req: NextRequest) {
       durationMinutes: data.durationMinutes,
       difficulty: data.difficulty,
       mode: data.mode as ExamMode,
+      adaptive: data.adaptive,
     });
 
     return NextResponse.json({

@@ -61,7 +61,7 @@ export function Header() {
     { href: "/medical", label: t.nav.medical },
     { href: "/university", label: t.nav.university },
     { href: "/questions", label: t.nav.questionBank, icon: FileQuestion },
-    { href: "/exams/custom", label: t.nav.customExam, icon: Layers },
+    { href: "/exams", label: locale === "bn" ? "পরীক্ষা ও মডেল টেস্ট" : "Exams & Model Tests", icon: Layers },
     { href: "/library", label: t.nav.library, icon: Library },
     { href: "/pricing", label: t.nav.pricing, icon: CreditCard },
   ];

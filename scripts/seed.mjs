@@ -672,6 +672,75 @@ async function main() {
   });
 
   console.log("✓ Digital library resources seeded");
+
+  // 9. Exam Templates (Model Tests & Board Papers)
+  const templatesToSeed = [
+    {
+      titleBn: "HSC পদার্থবিজ্ঞান ১ম পত্র - স্পেশাল মডেল টেস্ট",
+      titleEn: "HSC Physics 1st Paper - Special Model Test",
+      category: ExamCategoryType.HSC,
+      subjectId: hscPhy.id,
+      durationMinutes: 25,
+      totalMarks: 25,
+      negativeMarks: 0.25,
+      questionCount: 25,
+      isPremium: false,
+      mode: "REAL_EXAM",
+      instructionsBn: "মোট ২৫টি প্রশ্ন থাকবে। প্রতিটি সঠিক উত্তরের জন্য ১ নম্বর এবং প্রতিটি ভুল উত্তরের জন্য ০.২৫ নম্বর কাটা যাবে। সময় ২৫ মিনিট।",
+      instructionsEn: "25 questions in total. +1 for correct, -0.25 for incorrect answer. Duration 25 minutes.",
+    },
+    {
+      titleBn: "ঢাকা বোর্ড ২০২৩ - পদার্থবিজ্ঞান ১ম পত্র",
+      titleEn: "Dhaka Board 2023 - Physics 1st Paper",
+      category: ExamCategoryType.HSC,
+      subjectId: hscPhy.id,
+      durationMinutes: 25,
+      totalMarks: 25,
+      negativeMarks: 0.25,
+      questionCount: 25,
+      isPremium: false,
+      mode: "REAL_EXAM",
+      instructionsBn: "বিগত ঢাকা বোর্ড ২০২৩ এর পদার্থবিজ্ঞান ১ম পত্রের প্রশ্নপত্র। সময় ২৫ মিনিট।",
+      instructionsEn: "Past Dhaka Board 2023 Physics 1st Paper question paper. Duration 25 minutes.",
+    },
+    {
+      titleBn: "মেডিকেল ভর্তি পূর্ণাঙ্গ মডেল টেস্ট ২০২৪",
+      titleEn: "Medical Admission Full Model Test 2024",
+      category: ExamCategoryType.MEDICAL,
+      subjectId: medBio.id,
+      durationMinutes: 60,
+      totalMarks: 100,
+      negativeMarks: 0.25,
+      questionCount: 100,
+      isPremium: false,
+      mode: "REAL_EXAM",
+      instructionsBn: "মেডিকেল ভর্তি পরীক্ষার অনুরূপ ১০০ নম্বরের মডেল টেস্ট। প্রতিটি ভুল উত্তরের জন্য ০.২৫ কাটা যাবে।",
+      instructionsEn: "Medical Admission 100-mark model test with 0.25 negative marking.",
+    },
+    {
+      titleBn: "SSC ২০২৬ বিশেষ মডেল টেস্ট - সাধারণ গণিত",
+      titleEn: "SSC 2026 Special Model Test - General Math",
+      category: ExamCategoryType.SSC,
+      subjectId: sscMath.id,
+      durationMinutes: 30,
+      totalMarks: 30,
+      negativeMarks: 0.25,
+      questionCount: 30,
+      isPremium: false,
+      mode: "REAL_EXAM",
+      instructionsBn: "এসএসসি পরীক্ষার্থীদের জন্য ৩০ নম্বরের এমসিকিউ মডেল টেস্ট। সময় ৩০ মিনিট।",
+      instructionsEn: "30-mark MCQ model test for SSC candidates. Duration 30 minutes.",
+    },
+  ];
+
+  for (const tmpl of templatesToSeed) {
+    const existing = await prisma.examTemplate.findFirst({ where: { titleBn: tmpl.titleBn } });
+    if (!existing) {
+      await prisma.examTemplate.create({ data: tmpl });
+    }
+  }
+  console.log("✓ Exam templates seeded");
+
   console.log("🎉 Seeding completed successfully!");
 }
 

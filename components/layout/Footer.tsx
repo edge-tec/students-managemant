@@ -73,6 +73,11 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/exams" className="hover:text-emerald-400 transition">
+                  {locale === "bn" ? "পরীক্ষা ও মডেল টেস্ট" : "Exams & Model Tests"}
+                </Link>
+              </li>
+              <li>
                 <Link href="/exams/custom" className="hover:text-emerald-400 transition">
                   {t.nav.customExam}
                 </Link>

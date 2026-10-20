@@ -7,6 +7,8 @@ describe("Examination Engine Integration Tests", () => {
   let testStudentId: string;
   let testSubjectId: string;
   let testSessionId: string;
+  let testTemplateSessionId: string;
+  let templateId: string;
 
   beforeAll(async () => {
     // Find seeded student and subject
@@ -21,15 +23,23 @@ describe("Examination Engine Integration Tests", () => {
     });
     if (!subject) throw new Error("Seed subject not found");
     testSubjectId = subject.id;
+
+    // Find seeded exam template
+    const template = await prisma.examTemplate.findFirst({
+      where: { category: ExamCategoryType.HSC },
+    });
+    if (!template) throw new Error("Seed exam template not found");
+    templateId = template.id;
   });
 
   afterAll(async () => {
-    // Cleanup created test session
-    if (testSessionId) {
-      await prisma.studentAnswer.deleteMany({ where: { sessionId: testSessionId } });
-      await prisma.examResult.deleteMany({ where: { sessionId: testSessionId } });
-      await prisma.examSessionQuestion.deleteMany({ where: { sessionId: testSessionId } });
-      await prisma.examSession.deleteMany({ where: { id: testSessionId } });
+    // Cleanup created test sessions
+    const sessionIds = [testSessionId, testTemplateSessionId].filter(Boolean);
+    for (const sid of sessionIds) {
+      await prisma.studentAnswer.deleteMany({ where: { sessionId: sid } });
+      await prisma.examResult.deleteMany({ where: { sessionId: sid } });
+      await prisma.examSessionQuestion.deleteMany({ where: { sessionId: sid } });
+      await prisma.examSession.deleteMany({ where: { id: sid } });
     }
   });
 
@@ -93,7 +103,6 @@ describe("Examination Engine Integration Tests", () => {
     const q1 = sqList[0].question;
     const correctKey = q1.answer?.correctKey || "A";
 
-    // Prepare answers: Q1 correct, and if Q2 exists mark as wrong
     const testAnswers = [
       { questionId: q1.id, selectedOption: correctKey, timeSpentSec: 10 },
     ];
@@ -117,7 +126,6 @@ describe("Examination Engine Integration Tests", () => {
 
     if (wrongQId) {
       expect(evaluation.result.incorrectCount).toBe(1);
-      // Correct: 1 * 1.0 = 1.0, Incorrect: 1 * 0.25 = 0.25 -> Total Score = 0.75
       expect(evaluation.result.totalScore).toBeCloseTo(0.75, 2);
 
       // Verify incorrect question was stored in student's WrongQuestion notebook
@@ -132,5 +140,97 @@ describe("Examination Engine Integration Tests", () => {
       expect(wrongEntry).not.toBeNull();
       expect(wrongEntry?.mistakeCount).toBeGreaterThanOrEqual(1);
     }
+
+    // Cohort ranking and percentile
+    expect(evaluation.result.rankInCohort).toBeGreaterThanOrEqual(1);
+    expect(evaluation.result.cohortSize).toBeGreaterThanOrEqual(1);
+    expect(evaluation.result.percentile).toBeDefined();
+  });
+
+  it("should list available exam templates with attempt status", async () => {
+    const templates = await ExamService.listExamTemplates({
+      category: ExamCategoryType.HSC,
+      studentId: testStudentId,
+    });
+
+    expect(templates.length).toBeGreaterThan(0);
+    const target = templates.find((t) => t.id === templateId);
+    expect(target).toBeDefined();
+    expect(target?.titleBn).toBeDefined();
+    expect(target?.questionCount).toBeGreaterThan(0);
+  });
+
+  it("should create an exam session from an ExamTemplate", async () => {
+    const session = await ExamService.createExamFromTemplate(templateId, testStudentId);
+
+    expect(session).toBeDefined();
+    expect(session.templateId).toBe(templateId);
+    expect(session.status).toBe("IN_PROGRESS");
+    expect(session.totalQuestions).toBeGreaterThan(0);
+
+    testTemplateSessionId = session.id;
+  });
+
+  it("should evaluate a template exam and update leaderboard and student history", async () => {
+    const sessionWithQuestions = await prisma.examSession.findUnique({
+      where: { id: testTemplateSessionId },
+      include: {
+        sessionQuestions: {
+          include: {
+            question: { include: { answer: true } },
+          },
+        },
+      },
+    });
+
+    expect(sessionWithQuestions).not.toBeNull();
+    const sq = sessionWithQuestions!.sessionQuestions[0];
+    const correctKey = sq.question.answer?.correctKey || "A";
+
+    const evaluation = await ExamService.submitAndEvaluateExam({
+      sessionId: testTemplateSessionId,
+      studentId: testStudentId,
+      answers: [{ questionId: sq.question.id, selectedOption: correctKey, timeSpentSec: 30 }],
+    });
+
+    expect(evaluation.result.totalScore).toBeGreaterThan(0);
+    expect(evaluation.result.rankInCohort).toBeGreaterThanOrEqual(1);
+
+    // Verify leaderboard returns this result
+    const leaderboard = await ExamService.getExamLeaderboard({
+      templateId,
+      limit: 5,
+    });
+    expect(leaderboard.length).toBeGreaterThanOrEqual(1);
+    expect(leaderboard[0].score).toBeGreaterThan(0);
+    expect(leaderboard[0].studentName).toBeDefined();
+
+    // Verify student history returns completed sessions
+    const history = await ExamService.getStudentExamHistory(testStudentId, 5);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    const found = history.find((h) => h.id === testTemplateSessionId);
+    expect(found).toBeDefined();
+    expect(found?.result?.totalScore).toBeDefined();
+  });
+
+  it("should create an adaptive custom exam targeting unmastered wrong questions", async () => {
+    const adaptiveSession = await ExamService.createCustomExam({
+      studentId: testStudentId,
+      category: ExamCategoryType.HSC,
+      subjectId: testSubjectId,
+      chapterIds: [],
+      questionCount: 2,
+      durationMinutes: 10,
+      difficulty: "MIXED",
+      mode: ExamMode.REAL_EXAM,
+      adaptive: true,
+    });
+
+    expect(adaptiveSession).toBeDefined();
+    expect(adaptiveSession.totalQuestions).toBeGreaterThanOrEqual(1);
+
+    // Clean up adaptive session
+    await prisma.examSessionQuestion.deleteMany({ where: { sessionId: adaptiveSession.id } });
+    await prisma.examSession.deleteMany({ where: { id: adaptiveSession.id } });
   });
 });
