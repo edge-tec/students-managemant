@@ -9,10 +9,9 @@ interface MathTextProps {
 }
 
 export function MathText({ text, className = "" }: MathTextProps) {
-  if (!text) return null;
-
   // Render LaTeX formulas where detected
   const renderedContent = useMemo(() => {
+    if (!text) return null;
     // Check if the text contains LaTeX delimiters or standard math commands
     const hasLatex =
       text.includes("$") ||

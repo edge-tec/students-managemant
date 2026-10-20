@@ -113,7 +113,7 @@ export default function AiAssistantPage() {
                   onClick={() => setPrompt(s)}
                   className="hover:text-emerald-700 hover:underline text-left cursor-pointer"
                 >
-                  "{s.slice(0, 32)}..."
+                  &ldquo;{s.slice(0, 32)}...&rdquo;
                 </button>
               ))}
             </div>

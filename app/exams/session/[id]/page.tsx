@@ -99,57 +99,9 @@ export default function ExamSessionPage() {
       });
   }, [id, router]);
 
-  // Synchronized countdown timer
-  useEffect(() => {
-    if (!session || session.mode === "PRACTICE" || timeLeftSec <= 0) return;
-
-    const timer = setInterval(() => {
-      setTimeLeftSec((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          // Trigger auto-submit when server deadline is reached
-          handleSubmitExam(true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [session, timeLeftSec]);
-
-  // Autosave answer handler
-  const handleSelectOption = async (questionId: string, optionKey: string) => {
-    const nextOption = selectedAnswers[questionId] === optionKey ? null : optionKey;
-
-    // Optimistic UI update
-    setSelectedAnswers((prev) => ({
-      ...prev,
-      [questionId]: nextOption,
-    }));
-
-    setAutoSavedNotice(true);
-    setTimeout(() => setAutoSavedNotice(false), 1500);
-
-    // Persist to server
-    try {
-      await fetch(`/api/v1/exams/${id}/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionId,
-          selectedOption: nextOption,
-          timeSpentSec: 5,
-        }),
-      });
-    } catch (err) {
-      console.error("Autosave network error:", err);
-    }
-  };
-
   // Submit exam handler
   const handleSubmitExam = useCallback(
-    async (isAutoSubmit = false) => {
+    async () => {
       if (isSubmitting) return;
       setIsSubmitting(true);
       setShowConfirmModal(false);
@@ -179,6 +131,54 @@ export default function ExamSessionPage() {
     },
     [id, session, selectedAnswers, isSubmitting, router]
   );
+
+  // Synchronized countdown timer
+  useEffect(() => {
+    if (!session || session.mode === "PRACTICE" || timeLeftSec <= 0) return;
+
+    const timer = setInterval(() => {
+      setTimeLeftSec((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          // Trigger auto-submit when server deadline is reached
+          handleSubmitExam();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [session, timeLeftSec, handleSubmitExam]);
+
+  // Autosave answer handler
+  const handleSelectOption = async (questionId: string, optionKey: string) => {
+    const nextOption = selectedAnswers[questionId] === optionKey ? null : optionKey;
+
+    // Optimistic UI update
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [questionId]: nextOption,
+    }));
+
+    setAutoSavedNotice(true);
+    setTimeout(() => setAutoSavedNotice(false), 1500);
+
+    // Persist to server
+    try {
+      await fetch(`/api/v1/exams/${id}/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId,
+          selectedOption: nextOption,
+          timeSpentSec: 5,
+        }),
+      });
+    } catch (err) {
+      console.error("Autosave network error:", err);
+    }
+  };
 
   if (loading) {
     return (
@@ -413,7 +413,7 @@ export default function ExamSessionPage() {
               </button>
               <button
                 type="button"
-                onClick={() => handleSubmitExam(false)}
+                onClick={() => handleSubmitExam()}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
               >
                 {t.exam.submitExam}
