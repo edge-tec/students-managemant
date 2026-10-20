@@ -1,0 +1,946 @@
+// Prisma Schema for Bilingual Educational Platform for Bangladesh
+// Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------------------
+// ENUMS
+// -------------------------------------------------------------------------
+
+enum UserRoleType {
+  STUDENT
+  TEACHER
+  CONTENT_REVIEWER
+  CONTENT_MANAGER
+  SUPPORT_AGENT
+  FINANCE_MANAGER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ExamCategoryType {
+  SSC
+  HSC
+  MEDICAL
+  DENTAL
+  UNIVERSITY
+  MODEL_TEST
+}
+
+enum QuestionType {
+  MCQ
+  CQ
+  FILL_IN_BLANK
+}
+
+enum DifficultyLevel {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ExamMode {
+  PRACTICE
+  REAL_EXAM
+}
+
+enum ExamSessionStatus {
+  CREATED
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+  EVALUATED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  VERIFIED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  BKASH
+  NAGAD
+  BANK_TRANSFER
+  CARD
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  GRACE_PERIOD
+}
+
+enum DoubtStatus {
+  OPEN
+  ASSIGNED
+  ANSWERED
+  RESOLVED
+}
+
+enum ResourceType {
+  NOTES
+  SLIDES
+  FORMULA_SHEET
+  MODEL_PAPER
+  SUGGESTION
+  PDF_BOOK
+}
+
+// -------------------------------------------------------------------------
+// USER, AUTH & PROFILES
+// -------------------------------------------------------------------------
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  phoneNumber   String?        @unique
+  passwordHash  String
+  fullName      String
+  fullNameBn    String?
+  avatarUrl     String?
+  isVerified    Boolean        @default(false)
+  verificationToken String?
+  isActive      Boolean        @default(true)
+  preferredLang String         @default("bn") // "bn" or "en"
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  profile       UserProfile?
+  userRoles     UserRole[]
+  preferences   StudentPreference?
+  
+  // Relations to academic & exam activities
+  examSessions  ExamSession[]
+  examResults   ExamResult[]
+  wrongQuestions WrongQuestion[]
+  bookmarks     Bookmark[]
+  collections   PersonalQuestionCollection[]
+  enrollments   CourseEnrollment[]
+  progress      LearningProgress[]
+  studyTargets  StudyTarget[]
+  studyActivities StudyActivity[]
+  studyStreaks  StudyStreak[]
+  subscriptions Subscription[]
+  paymentOrders PaymentOrder[]
+  doubtTickets  DoubtTicket[]  @relation("StudentDoubts")
+  answeredDoubts DoubtResponse[] @relation("TeacherResponses")
+  notifications Notification[]
+  notificationPref NotificationPreference?
+  auditLogs     AuditLog[]
+  importJobs    ImportJob[]
+  assignedReviews ContentReview[] @relation("ReviewerAssigned")
+  createdQuestions Question[]  @relation("QuestionAuthor")
+
+  @@index([email])
+  @@index([phoneNumber])
+}
+
+model UserProfile {
+  id              String         @id @default(uuid())
+  userId          String         @unique
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetCategory  ExamCategoryType?
+  institutionName String?
+  hscYear         Int?
+  sscYear         Int?
+  district        String?
+  division        String?
+  bio             String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Role {
+  id          String         @id @default(uuid())
+  name        UserRoleType   @unique
+  description String?
+  permissions Permission[]
+  userRoles   UserRole[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  roleId      String
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  action      String   // e.g. "create:question", "publish:content", "manage:users"
+  resource    String   // e.g. "question", "exam", "finance"
+  createdAt   DateTime @default(now())
+
+  @@unique([roleId, action, resource])
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, roleId])
+}
+
+model StudentPreference {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  examCategory   ExamCategoryType @default(SSC)
+  currentClassId String?
+  soundEnabled   Boolean   @default(true)
+  timerWarningMin Int      @default(5)
+  showExplanationImmediately Boolean @default(true)
+  updatedAt      DateTime  @updatedAt
+}
+
+// -------------------------------------------------------------------------
+// CURRICULUM ARCHITECTURE (SSC, HSC, MEDICAL, UNIVERSITY)
+// -------------------------------------------------------------------------
+
+model AcademicClass {
+  id          String        @id @default(uuid())
+  code        String        @unique // e.g. "CLASS_9", "CLASS_10", "CLASS_11", "CLASS_12", "ADMISSION"
+  nameEn      String
+  nameBn      String
+  orderIndex  Int           @default(0)
+  subjects    Subject[]
+  createdAt   DateTime      @default(now())
+}
+
+model ExaminationBoard {
+  id          String        @id @default(uuid())
+  code        String        @unique // e.g. "DHA", "RAJ", "CTG", "BAR", "COM", "DIN", "JES", "MYM", "SYL", "MAD", "TEC"
+  nameEn      String
+  nameBn      String
+  questions   QuestionReference[]
+}
+
+model University {
+  id          String         @id @default(uuid())
+  code        String         @unique // e.g. "DU", "RU", "CU", "JU", "GST", "AGRI", "BUET", "DMC"
+  nameEn      String
+  nameBn      String
+  shortName   String
+  admissionUnits AdmissionUnit[]
+  questions   QuestionReference[]
+}
+
+model AdmissionUnit {
+  id            String       @id @default(uuid())
+  universityId  String
+  university    University   @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  code          String       // e.g. "KA", "KHA", "GA", "A", "B", "C"
+  nameEn        String
+  nameBn        String
+  focusGroup    String?      // Science, Arts, Commerce
+  questions     QuestionReference[]
+
+  @@unique([universityId, code])
+}
+
+model Subject {
+  id          String         @id @default(uuid())
+  code        String         @unique // e.g. "PHY_1", "CHEM_1", "BIO_1", "MATH_1", "ENG", "BAN"
+  nameEn      String
+  nameBn      String
+  category    ExamCategoryType
+  classId     String?
+  academicClass AcademicClass? @relation(fields: [classId], references: [id])
+  papers      Paper[]
+  books       Book[]
+  chapters    Chapter[]
+  questions   Question[]
+  courses     Course[]
+  libraryResources LibraryResource[]
+  doubtTickets DoubtTicket[]
+  orderIndex  Int            @default(0)
+
+  @@index([category])
+}
+
+model Paper {
+  id          String         @id @default(uuid())
+  subjectId   String
+  subject     Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  paperNumber Int            // 1 or 2
+  nameEn      String         // "1st Paper" / "2nd Paper"
+  nameBn      String         // "১ম পত্র" / "২য় পত্র"
+  chapters    Chapter[]
+  questions   Question[]
+
+  @@unique([subjectId, paperNumber])
+}
+
+model Book {
+  id          String         @id @default(uuid())
+  subjectId   String
+  subject     Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  titleEn     String
+  titleBn     String
+  author      String?
+  publisher   String?
+  edition     String?
+}
+
+model Chapter {
+  id          String         @id @default(uuid())
+  subjectId   String
+  subject     Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  paperId     String?
+  paper       Paper?         @relation(fields: [paperId], references: [id])
+  chapterNum  Int
+  nameEn      String
+  nameBn      String
+  description String?
+  topics      Topic[]
+  questions   Question[]
+  lessons     Lesson[]
+  libraryResources LibraryResource[]
+  orderIndex  Int            @default(0)
+
+  @@index([subjectId, chapterNum])
+}
+
+model Topic {
+  id          String         @id @default(uuid())
+  chapterId   String
+  chapter     Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  nameEn      String
+  nameBn      String
+  orderIndex  Int            @default(0)
+  questions   Question[]
+}
+
+// -------------------------------------------------------------------------
+// QUESTION BANK & VERIFIED HISTORICAL REFERENCES
+// -------------------------------------------------------------------------
+
+model Question {
+  id                String            @id @default(uuid())
+  slug              String            @unique @default(cuid())
+  type              QuestionType      @default(MCQ)
+  difficulty        DifficultyLevel   @default(MEDIUM)
+  status            ContentStatus     @default(PUBLISHED)
+  isPremium         Boolean           @default(false)
+  
+  // Bilingual Content
+  questionTextBn    String
+  questionTextEn    String?
+  
+  // Marks & Rules
+  marks             Float             @default(1.0)
+  negativeMarks     Float             @default(0.25)
+  estimatedSeconds  Int               @default(60)
+
+  // Academic hierarchy
+  category          ExamCategoryType
+  subjectId         String
+  subject           Subject           @relation(fields: [subjectId], references: [id])
+  paperId           String?
+  paper             Paper?            @relation(fields: [paperId], references: [id])
+  chapterId         String
+  chapter           Chapter           @relation(fields: [chapterId], references: [id])
+  topicId           String?
+  topic             Topic?            @relation(fields: [topicId], references: [id])
+
+  // Context & Textbook
+  textbookRef       String?
+  teacherTipsBn     String?
+  teacherTipsEn     String?
+
+  authorId          String?
+  author            User?             @relation("QuestionAuthor", fields: [authorId], references: [id])
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Child Relations
+  options           QuestionOption[]
+  answer            QuestionAnswer?
+  references        QuestionReference[]
+  tags              QuestionTag[]
+  revisions         QuestionRevision[]
+  reviews           ContentReview[]
+  sessionQuestions  ExamSessionQuestion[]
+  studentAnswers    StudentAnswer[]
+  wrongQuestionEntries WrongQuestion[]
+  bookmarks         Bookmark[]
+  collectionItems   PersonalQuestionCollectionItem[]
+
+  // Self-relation for similar questions
+  similarQuestions  SimilarQuestion[] @relation("SourceQuestion")
+  referencedBy      SimilarQuestion[] @relation("SimilarTarget")
+
+  @@index([category, subjectId, chapterId])
+  @@index([status])
+  @@index([difficulty])
+}
+
+model QuestionOption {
+  id          String      @id @default(uuid())
+  questionId  String
+  question    Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  optionKey   String      // "A", "B", "C", "D"
+  textBn      String
+  textEn      String?
+  isCorrect   Boolean     @default(false)
+  orderIndex  Int         @default(0)
+
+  @@unique([questionId, optionKey])
+}
+
+model QuestionAnswer {
+  id            String    @id @default(uuid())
+  questionId    String    @unique
+  question      Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  correctKey    String    // "A", "B", "C", or "D"
+  explanationBn String
+  explanationEn String?
+}
+
+model QuestionReference {
+  id              String             @id @default(uuid())
+  questionId      String
+  question        Question           @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  boardId         String?
+  board           ExaminationBoard?  @relation(fields: [boardId], references: [id])
+  universityId    String?
+  university      University?        @relation(fields: [universityId], references: [id])
+  admissionUnitId String?
+  admissionUnit   AdmissionUnit?     @relation(fields: [admissionUnitId], references: [id])
+  examYear        Int
+  examSessionName String?            // e.g. "Medical Admission Test 2023-24", "Dhaka Board 2022"
+
+  @@index([boardId, examYear])
+  @@index([universityId, examYear])
+}
+
+model QuestionTag {
+  id         String   @id @default(uuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  tag        String
+
+  @@unique([questionId, tag])
+}
+
+model SimilarQuestion {
+  id                String   @id @default(uuid())
+  sourceQuestionId  String
+  sourceQuestion    Question @relation("SourceQuestion", fields: [sourceQuestionId], references: [id], onDelete: Cascade)
+  similarQuestionId String
+  similarQuestion   Question @relation("SimilarTarget", fields: [similarQuestionId], references: [id], onDelete: Cascade)
+  similarityScore   Float    @default(1.0)
+
+  @@unique([sourceQuestionId, similarQuestionId])
+}
+
+model QuestionRevision {
+  id         String   @id @default(uuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  changedBy  String
+  diffJson   String   // JSON string of fields changed
+  reason     String?
+  createdAt  DateTime @default(now())
+}
+
+model ContentReview {
+  id          String        @id @default(uuid())
+  questionId  String
+  question    Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    User          @relation("ReviewerAssigned", fields: [reviewerId], references: [id])
+  status      ContentStatus
+  comments    String?
+  reviewedAt  DateTime      @default(now())
+}
+
+// -------------------------------------------------------------------------
+// EXAMINATION ENGINE & ATTEMPTS
+// -------------------------------------------------------------------------
+
+model ExamTemplate {
+  id               String           @id @default(uuid())
+  titleBn          String
+  titleEn          String
+  category         ExamCategoryType
+  subjectId        String?
+  durationMinutes  Int
+  totalMarks       Float
+  negativeMarks    Float            @default(0.25)
+  questionCount    Int
+  isPublished      Boolean          @default(true)
+  isPremium        Boolean          @default(false)
+  mode             ExamMode         @default(REAL_EXAM)
+  instructionsBn   String?
+  instructionsEn   String?
+  sessions         ExamSession[]
+  createdAt        DateTime         @default(now())
+}
+
+model ExamSession {
+  id               String               @id @default(uuid())
+  studentId        String
+  student          User                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  templateId       String?
+  template         ExamTemplate?        @relation(fields: [templateId], references: [id])
+  category         ExamCategoryType
+  mode             ExamMode             @default(REAL_EXAM)
+  status           ExamSessionStatus    @default(CREATED)
+  
+  // Server-authoritative timing
+  durationMinutes  Int
+  serverStartTime  DateTime             @default(now())
+  serverDeadline   DateTime
+  submittedAt      DateTime?
+
+  // Snapshot of marking configuration
+  correctMark      Float                @default(1.0)
+  negativeMark     Float                @default(0.25)
+  totalQuestions   Int
+
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  sessionQuestions ExamSessionQuestion[]
+  studentAnswers   StudentAnswer[]
+  result           ExamResult?
+
+  @@index([studentId, status])
+}
+
+model ExamSessionQuestion {
+  id          String      @id @default(uuid())
+  sessionId   String
+  session     ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId  String
+  question    Question    @relation(fields: [questionId], references: [id])
+  orderIndex  Int
+
+  @@unique([sessionId, questionId])
+  @@index([sessionId, orderIndex])
+}
+
+model StudentAnswer {
+  id             String      @id @default(uuid())
+  sessionId      String
+  session        ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId     String
+  question       Question    @relation(fields: [questionId], references: [id])
+  selectedOption String?     // "A", "B", "C", "D" or null
+  isCorrect      Boolean?
+  timeSpentSec   Int         @default(0)
+  savedAt        DateTime    @default(now())
+
+  @@unique([sessionId, questionId])
+}
+
+model ExamResult {
+  id              String      @id @default(uuid())
+  sessionId       String      @unique
+  session         ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  totalScore      Float
+  maxMarks        Float
+  correctCount    Int
+  incorrectCount  Int
+  unansweredCount Int
+  accuracyPct     Float
+  timeSpentSec    Int
+  
+  rankInCohort    Int?
+  cohortSize      Int?
+  percentile      Float?
+
+  subjectBreakdownJson String // JSON containing per-subject score and accuracy
+  chapterBreakdownJson String // JSON containing per-chapter performance
+  
+  evaluatedAt     DateTime    @default(now())
+
+  @@index([studentId])
+}
+
+model WrongQuestion {
+  id           String      @id @default(uuid())
+  studentId    String
+  student      User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  mistakeCount Int         @default(1)
+  isMastered   Boolean     @default(false)
+  lastMistake  DateTime    @default(now())
+  masteredAt   DateTime?
+
+  @@unique([studentId, questionId])
+  @@index([studentId, isMastered])
+}
+
+model Bookmark {
+  id         String   @id @default(uuid())
+  studentId  String
+  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([studentId, questionId])
+}
+
+model PersonalQuestionCollection {
+  id          String                           @id @default(uuid())
+  studentId   String
+  student     User                             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  items       PersonalQuestionCollectionItem[]
+  createdAt   DateTime                         @default(now())
+}
+
+model PersonalQuestionCollectionItem {
+  id           String                     @id @default(uuid())
+  collectionId String
+  collection   PersonalQuestionCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question                   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  addedAt      DateTime                   @default(now())
+
+  @@unique([collectionId, questionId])
+}
+
+// -------------------------------------------------------------------------
+// DIGITAL LIBRARY & ONLINE CLASSROOM
+// -------------------------------------------------------------------------
+
+model Course {
+  id           String             @id @default(uuid())
+  titleBn      String
+  titleEn      String
+  description  String?
+  category     ExamCategoryType
+  subjectId    String?
+  subject      Subject?           @relation(fields: [subjectId], references: [id])
+  thumbnailUrl String?
+  isPremium    Boolean            @default(false)
+  isPublished  Boolean            @default(true)
+  lessons      Lesson[]
+  enrollments  CourseEnrollment[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}
+
+model CourseEnrollment {
+  id         String   @id @default(uuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  studentId  String
+  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrolledAt DateTime @default(now())
+
+  @@unique([courseId, studentId])
+}
+
+model Lesson {
+  id          String             @id @default(uuid())
+  courseId    String
+  course      Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  chapterId   String?
+  chapter     Chapter?           @relation(fields: [chapterId], references: [id])
+  titleBn     String
+  titleEn     String
+  videoUrl    String?            // Video stream URL / playback identifier
+  durationSec Int                @default(0)
+  orderIndex  Int                @default(0)
+  resources   LessonResource[]
+  progress    LearningProgress[]
+}
+
+model LessonResource {
+  id        String   @id @default(uuid())
+  lessonId  String
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title     String
+  fileUrl   String
+  fileType  String
+  createdAt DateTime @default(now())
+}
+
+model LearningProgress {
+  id            String    @id @default(uuid())
+  studentId     String
+  student       User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  lessonId      String
+  lesson        Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  watchDuration Int       @default(0)
+  isCompleted   Boolean   @default(false)
+  completedAt   DateTime?
+
+  @@unique([studentId, lessonId])
+}
+
+model LibraryResource {
+  id          String           @id @default(uuid())
+  titleBn     String
+  titleEn     String
+  description String?
+  type        ResourceType     @default(NOTES)
+  category    ExamCategoryType
+  subjectId   String?
+  subject     Subject?         @relation(fields: [subjectId], references: [id])
+  chapterId   String?
+  chapter     Chapter?         @relation(fields: [chapterId], references: [id])
+  fileUrl     String
+  fileSizeMb  Float            @default(1.0)
+  isPremium   Boolean          @default(false)
+  viewCount   Int              @default(0)
+  downloadCount Int            @default(0)
+  createdAt   DateTime         @default(now())
+}
+
+// -------------------------------------------------------------------------
+// STUDENT ENGAGEMENT, STREAKS & TARGETS
+// -------------------------------------------------------------------------
+
+model StudyTarget {
+  id             String    @id @default(uuid())
+  studentId      String
+  student        User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  targetDate     DateTime  @default(now())
+  targetQuestions Int      @default(20)
+  completedQuestions Int   @default(0)
+  isCompleted    Boolean   @default(false)
+
+  @@unique([studentId, targetDate])
+}
+
+model StudyActivity {
+  id           String   @id @default(uuid())
+  studentId    String
+  student      User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  activityType String   // "EXAM_TAKEN", "LESSON_WATCHED", "PRACTICE_SOLVED"
+  durationMin  Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([studentId, createdAt])
+}
+
+model StudyStreak {
+  id            String    @id @default(uuid())
+  studentId     String    @unique
+  student       User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  currentStreak Int       @default(1)
+  longestStreak Int       @default(1)
+  lastActiveDay DateTime  @default(now())
+}
+
+// -------------------------------------------------------------------------
+// BILLING, SUBSCRIPTIONS & PAYMENT PROVIDERS
+// -------------------------------------------------------------------------
+
+model SubscriptionPlan {
+  id             String           @id @default(uuid())
+  code           String           @unique // "FREE", "SSC_PREMIUM", "HSC_PREMIUM", "MED_PREMIUM", "VARSITY_PREMIUM", "ALL_ACCESS"
+  nameBn         String
+  nameEn         String
+  descriptionBn  String?
+  descriptionEn  String?
+  priceBdt       Float
+  durationDays   Int              @default(30)
+  category       ExamCategoryType?
+  featuresJson   String           // JSON array of feature descriptions
+  isActive       Boolean          @default(true)
+  subscriptions  Subscription[]
+  paymentOrders  PaymentOrder[]
+}
+
+model Subscription {
+  id         String             @id @default(uuid())
+  studentId  String
+  student    User               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  planId     String
+  plan       SubscriptionPlan   @relation(fields: [planId], references: [id])
+  status     SubscriptionStatus @default(ACTIVE)
+  startDate  DateTime           @default(now())
+  endDate    DateTime
+  orderId    String?            @unique
+  order      PaymentOrder?      @relation(fields: [orderId], references: [id])
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@index([studentId, status])
+}
+
+model PaymentOrder {
+  id             String               @id @default(uuid())
+  orderNumber    String               @unique // e.g. "ORD-2026-X83921"
+  studentId      String
+  student        User                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  planId         String
+  plan           SubscriptionPlan     @relation(fields: [planId], references: [id])
+  amountBdt      Float
+  paymentMethod  PaymentMethod        @default(BKASH)
+  status         PaymentStatus        @default(PENDING)
+  providerTxId   String?              @unique
+  notes          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  transactions   PaymentTransaction[]
+  subscription   Subscription?
+  refunds        Refund[]
+
+  @@index([studentId, status])
+}
+
+model PaymentTransaction {
+  id            String        @id @default(uuid())
+  orderId       String
+  order         PaymentOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  gateway       PaymentMethod
+  gatewayTxId   String
+  amount        Float
+  currency      String        @default("BDT")
+  rawCallback   String?       // JSON payload received from payment provider
+  isVerified    Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+
+  @@unique([gateway, gatewayTxId])
+}
+
+model Refund {
+  id          String        @id @default(uuid())
+  orderId     String
+  order       PaymentOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountBdt   Float
+  reason      String
+  processedAt DateTime      @default(now())
+}
+
+// -------------------------------------------------------------------------
+// DOUBT SOLVING & NOTIFICATIONS
+// -------------------------------------------------------------------------
+
+model DoubtTicket {
+  id          String          @id @default(uuid())
+  studentId   String
+  student     User            @relation("StudentDoubts", fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId   String
+  subject     Subject         @relation(fields: [subjectId], references: [id])
+  title       String
+  questionBn  String
+  imageUrl    String?
+  status      DoubtStatus     @default(OPEN)
+  responses   DoubtResponse[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([studentId, status])
+}
+
+model DoubtResponse {
+  id          String      @id @default(uuid())
+  ticketId    String
+  ticket      DoubtTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  teacherId   String
+  teacher     User        @relation("TeacherResponses", fields: [teacherId], references: [id], onDelete: Cascade)
+  responseBn  String
+  imageUrl    String?
+  createdAt   DateTime    @default(now())
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  titleBn     String
+  titleEn     String
+  messageBn   String
+  messageEn   String
+  linkUrl     String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+model NotificationPreference {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailExam   Boolean  @default(true)
+  emailClass  Boolean  @default(true)
+  emailBilling Boolean @default(true)
+  inAppExam   Boolean  @default(true)
+  inAppClass  Boolean  @default(true)
+  inAppBilling Boolean @default(true)
+}
+
+// -------------------------------------------------------------------------
+// ADMIN, IMPORT ENGINE, AUDIT & SYSTEM
+// -------------------------------------------------------------------------
+
+model ImportJob {
+  id              String        @id @default(uuid())
+  fileName        String
+  uploadedById    String
+  uploadedBy      User          @relation(fields: [uploadedById], references: [id])
+  totalRows       Int           @default(0)
+  successfulRows  Int           @default(0)
+  failedRows      Int           @default(0)
+  status          String        @default("PROCESSING") // "PROCESSING", "COMPLETED", "FAILED"
+  errors          ImportError[]
+  createdAt       DateTime      @default(now())
+}
+
+model ImportError {
+  id          String    @id @default(uuid())
+  jobId       String
+  job         ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rowNumber   Int
+  columnName  String?
+  errorMessage String
+  rowDataJson String?
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  action      String   // e.g. "USER_ROLE_UPDATED", "QUESTION_APPROVED", "PAYMENT_REFUNDED"
+  resource    String
+  resourceId  String?
+  detailsJson String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([action, resource])
+}
+
+model SiteSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}

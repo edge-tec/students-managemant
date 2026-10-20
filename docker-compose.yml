@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: edubd_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-edubd_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-edubd_secure_password_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-edubd_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/backup_db.sh:/usr/local/bin/backup_db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-edubd_user} -d ${POSTGRES_DB:-edubd_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: edubd_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: edubd_web
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-edubd_user}:${POSTGRES_PASSWORD:-edubd_secure_password_2026}@postgres:5432/${POSTGRES_DB:-edubd_db}?schema=public"
+      JWT_SECRET: ${JWT_SECRET:-edubd_production_jwt_secret_key_2026}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-edubd_production_nextauth_secret_2026}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_DEFAULT_LOCALE: "bn"
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  redis_data:
