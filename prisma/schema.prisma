@@ -106,6 +106,22 @@ enum ResourceType {
   PDF_BOOK
 }
 
+enum ReportReason {
+  WRONG_ANSWER
+  TYPO_OR_GRAMMAR
+  INCOMPLETE_QUESTION
+  IMAGE_OR_FORMULA_BROKEN
+  OUT_OF_SYLLABUS
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
 // -------------------------------------------------------------------------
 // USER, AUTH & PROFILES
 // -------------------------------------------------------------------------
@@ -150,6 +166,7 @@ model User {
   importJobs    ImportJob[]
   assignedReviews ContentReview[] @relation("ReviewerAssigned")
   createdQuestions Question[]  @relation("QuestionAuthor")
+  questionReports QuestionReport[]
 
   @@index([email])
   @@index([phoneNumber])
@@ -222,6 +239,7 @@ model AcademicClass {
   nameEn      String
   nameBn      String
   orderIndex  Int           @default(0)
+  isActive    Boolean       @default(true)
   subjects    Subject[]
   createdAt   DateTime      @default(now())
 }
@@ -231,6 +249,7 @@ model ExaminationBoard {
   code        String        @unique // e.g. "DHA", "RAJ", "CTG", "BAR", "COM", "DIN", "JES", "MYM", "SYL", "MAD", "TEC"
   nameEn      String
   nameBn      String
+  isActive    Boolean       @default(true)
   questions   QuestionReference[]
 }
 
@@ -273,6 +292,7 @@ model Subject {
   libraryResources LibraryResource[]
   doubtTickets DoubtTicket[]
   orderIndex  Int            @default(0)
+  isActive    Boolean        @default(true)
 
   @@index([category])
 }
@@ -286,6 +306,7 @@ model Paper {
   nameBn      String         // "১ম পত্র" / "২য় পত্র"
   chapters    Chapter[]
   questions   Question[]
+  isActive    Boolean        @default(true)
 
   @@unique([subjectId, paperNumber])
 }
@@ -316,6 +337,7 @@ model Chapter {
   lessons     Lesson[]
   libraryResources LibraryResource[]
   orderIndex  Int            @default(0)
+  isActive    Boolean        @default(true)
 
   @@index([subjectId, chapterNum])
 }
@@ -327,6 +349,7 @@ model Topic {
   nameEn      String
   nameBn      String
   orderIndex  Int            @default(0)
+  isActive    Boolean        @default(true)
   questions   Question[]
 }
 
@@ -366,6 +389,9 @@ model Question {
   textbookRef       String?
   teacherTipsBn     String?
   teacherTipsEn     String?
+  stemBn            String?           // Stimulus / উদ্দীপক for CQ (Creative Questions)
+  stemEn            String?
+  diagramUrl        String?           // Image, table, or diagram URL
 
   authorId          String?
   author            User?             @relation("QuestionAuthor", fields: [authorId], references: [id])
@@ -375,11 +401,13 @@ model Question {
 
   // Child Relations
   options           QuestionOption[]
+  subparts          QuestionSubpart[] // CQ (ক, খ, গ, ঘ) subparts with marks
   answer            QuestionAnswer?
   references        QuestionReference[]
   tags              QuestionTag[]
   revisions         QuestionRevision[]
   reviews           ContentReview[]
+  reports           QuestionReport[]
   sessionQuestions  ExamSessionQuestion[]
   studentAnswers    StudentAnswer[]
   wrongQuestionEntries WrongQuestion[]
@@ -408,6 +436,22 @@ model QuestionOption {
   @@unique([questionId, optionKey])
 }
 
+model QuestionSubpart {
+  id              String   @id @default(uuid())
+  questionId      String
+  question        Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  partLabel       String   // "ক", "খ", "গ", "ঘ" or "a", "b", "c", "d"
+  questionTextBn  String
+  questionTextEn  String?
+  marks           Float    // e.g. 1.0, 2.0, 3.0, 4.0
+  solutionBn      String
+  solutionEn      String?
+  markingGuidance String?  // Rubric / marking criteria
+  orderIndex      Int      @default(0)
+
+  @@unique([questionId, partLabel])
+}
+
 model QuestionAnswer {
   id            String    @id @default(uuid())
   questionId    String    @unique
@@ -415,6 +459,23 @@ model QuestionAnswer {
   correctKey    String    // "A", "B", "C", or "D"
   explanationBn String
   explanationEn String?
+}
+
+model QuestionReport {
+  id          String       @id @default(uuid())
+  questionId  String
+  question    Question     @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reason      ReportReason @default(OTHER)
+  description String?
+  status      ReportStatus @default(PENDING)
+  adminNotes  String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([questionId])
+  @@index([status])
 }
 
 model QuestionReference {

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
 import { MathText } from "@/components/ui/MathText";
@@ -10,10 +11,14 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Tag,
   BookOpen,
   ArrowRight,
   Layers,
+  GraduationCap,
+  Bookmark,
+  BookmarkCheck,
+  ExternalLink,
+  RotateCcw,
 } from "lucide-react";
 
 interface QuestionOption {
@@ -24,25 +29,57 @@ interface QuestionOption {
   isCorrect: boolean;
 }
 
+interface QuestionSubpart {
+  id: string;
+  partLabel: string;
+  questionTextBn: string;
+  marks: number;
+  solutionBn: string;
+}
+
 interface QuestionItem {
   id: string;
   category: string;
-  difficulty: string;
-  questionTextBn: string;
-  questionTextEn?: string | null;
+  type: "MCQ" | "CQ" | "SHORT";
+  difficulty: "EASY" | "MEDIUM" | "HARD";
   marks: number;
   negativeMarks: number;
+  questionTextBn: string;
+  questionTextEn?: string | null;
+  stemBn?: string | null;
+  stemEn?: string | null;
+  diagramUrl?: string | null;
   textbookRef?: string | null;
   teacherTipsBn?: string | null;
+  isBookmarked?: boolean;
   options: QuestionOption[];
+  subparts?: QuestionSubpart[];
   answer?: { correctKey: string; explanationBn: string; explanationEn?: string | null } | null;
   subject: { nameBn: string; nameEn: string; code: string };
+  paper?: { nameBn: string; paperNumber: number } | null;
   chapter: { nameBn: string; nameEn: string; chapterNum: number };
   references: { examYear: number; examSessionName?: string | null; board?: { nameBn: string } | null }[];
 }
 
+interface CurriculumSubject {
+  id: string;
+  code: string;
+  nameBn: string;
+  nameEn: string;
+  category: string;
+  papers: { id: string; paperNumber: number; nameBn: string }[];
+  chapters: { id: string; chapterNum: number; nameBn: string }[];
+}
+
+interface ExaminationBoard {
+  id: string;
+  code: string;
+  nameBn: string;
+  nameEn: string;
+}
+
 function QuestionBankContent() {
-  const { locale, t } = useI18n();
+  const { locale, t, formatNumber } = useI18n();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -53,17 +90,49 @@ function QuestionBankContent() {
   const [totalPages, setTotalPages] = useState(1);
   const [expandedSolutions, setExpandedSolutions] = useState<Record<string, boolean>>({});
 
-  // Filters
+  // Curriculum dropdown state
+  const [subjects, setSubjects] = useState<CurriculumSubject[]>([]);
+  const [boards, setBoards] = useState<ExaminationBoard[]>([]);
+
+  // Filter States
   const [category, setCategory] = useState(searchParams.get("category") || "");
-  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
+  const [subjectId, setSubjectId] = useState(searchParams.get("subjectId") || "");
+  const [paperId, setPaperId] = useState(searchParams.get("paperId") || "");
+  const [chapterId, setChapterId] = useState(searchParams.get("chapterId") || "");
+  const [boardId, setBoardId] = useState(searchParams.get("boardId") || "");
+  const [year, setYear] = useState(searchParams.get("year") || "");
   const [difficulty, setDifficulty] = useState(searchParams.get("difficulty") || "");
+  const [type, setType] = useState(searchParams.get("type") || "");
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
+
+  // Load curriculum metadata for dropdowns
+  useEffect(() => {
+    fetch("/api/v1/curriculum")
+      .then((res) => res.json())
+      .then((data) => {
+        setSubjects(data.subjects || []);
+        setBoards(data.boards || []);
+      })
+      .catch((err) => console.error("Curriculum load error:", err));
+  }, []);
+
+  // Filtered chapters & papers based on selected subject
+  const currentSubject = subjects.find((s) => s.id === subjectId);
+  const availablePapers = currentSubject?.papers || [];
+  const availableChapters = currentSubject?.chapters || [];
 
   const loadQuestions = useCallback(() => {
     setLoading(true);
     const params = new URLSearchParams();
     if (category) params.set("category", category);
-    if (searchQuery) params.set("q", searchQuery);
+    if (subjectId) params.set("subjectId", subjectId);
+    if (paperId) params.set("paperId", paperId);
+    if (chapterId) params.set("chapterId", chapterId);
+    if (boardId) params.set("boardId", boardId);
+    if (year) params.set("year", year);
     if (difficulty) params.set("difficulty", difficulty);
+    if (type) params.set("type", type);
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
     params.set("page", String(page));
     params.set("limit", "10");
 
@@ -76,7 +145,7 @@ function QuestionBankContent() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [category, searchQuery, difficulty, page]);
+  }, [category, subjectId, paperId, chapterId, boardId, year, difficulty, type, searchQuery, page]);
 
   useEffect(() => {
     loadQuestions();
@@ -86,45 +155,77 @@ function QuestionBankContent() {
     setExpandedSolutions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const handleToggleBookmark = async (questionId: string) => {
+    try {
+      const res = await fetch(`/api/v1/questions/${questionId}/bookmark`, { method: "POST" });
+      if (res.status === 401) {
+        router.push(`/login?redirect=/questions`);
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        setQuestions((prev) =>
+          prev.map((q) => (q.id === questionId ? { ...q, isBookmarked: data.bookmarked } : q))
+        );
+      }
+    } catch (err) {
+      console.error("Bookmark error:", err);
+    }
+  };
+
+  const handleResetFilters = () => {
+    setCategory("");
+    setSubjectId("");
+    setPaperId("");
+    setChapterId("");
+    setBoardId("");
+    setYear("");
+    setDifficulty("");
+    setType("");
+    setSearchQuery("");
+    setPage(1);
+  };
+
   const categories = [
     { label: t.common.all, value: "" },
-    { label: "SSC", value: "SSC" },
-    { label: "HSC", value: "HSC" },
-    { label: "Medical", value: "MEDICAL" },
-    { label: "Dental", value: "DENTAL" },
-    { label: "University", value: "UNIVERSITY" },
+    { label: "SSC (নবম-দশম)", value: "SSC" },
+    { label: "HSC (একাদশ-দ্বাদশ)", value: "HSC" },
+    { label: "মেডিকেল ভর্তি", value: "MEDICAL" },
+    { label: "বিশ্ববিদ্যালয় ভর্তি", value: "UNIVERSITY" },
   ];
 
+  const yearsList = [2024, 2023, 2022, 2021, 2020, 2019, 2018];
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 pb-5">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             {t.nav.questionBank}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
             {locale === "bn"
-              ? "বিগত বছরের বোর্ড প্রশ্ন, ভর্তি পরীক্ষা এবং অধ্যায়ভিত্তিক স্পেশাল প্রশ্নব্যাংক"
-              : "Explore verified past board papers, university questions and detailed solutions."}
+              ? "বিগত বছরের বোর্ড প্রশ্ন, সৃজনশীল (CQ) ও বহুনির্বাচনি (MCQ) প্রশ্নের নির্ভরযোগ্য আর্কাইভ"
+              : "Explore verified past board exams, creative questions (CQ) & MCQs with step-by-step solutions."}
           </p>
         </div>
 
-        <button
-          onClick={() => router.push("/exams/custom")}
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-semibold transition flex items-center gap-2 cursor-pointer shadow-xs"
+        <Link
+          href="/exams/custom"
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 shadow-xs"
         >
           <Layers className="w-4 h-4" />
           <span>{t.exam.customBuilderTitle}</span>
-        </button>
+        </Link>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-4">
+      {/* Filter and Search Panel */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        {/* Search Bar & Reset */}
         <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search Input */}
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             <input
               type="text"
               value={searchQuery}
@@ -132,43 +233,41 @@ function QuestionBankContent() {
                 setSearchQuery(e.target.value);
                 setPage(1);
               }}
-              placeholder={t.common.searchPlaceholder}
-              className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-300 rounded-lg focus:border-emerald-600 outline-none"
+              placeholder="বাংলা বা ইংরেজিতে প্রশ্ন বা কীওয়ার্ড অনুসন্ধান করুন..."
+              className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:border-emerald-600 outline-none"
             />
           </div>
 
-          {/* Difficulty Select */}
-          <select
-            value={difficulty}
-            onChange={(e) => {
-              setDifficulty(e.target.value);
-              setPage(1);
-            }}
-            className="px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:border-emerald-600 outline-none bg-white text-slate-700"
+          <button
+            type="button"
+            onClick={handleResetFilters}
+            className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shrink-0"
+            title="সব ফিল্টার রিসেট করুন"
           >
-            <option value="">{locale === "bn" ? "সকল কাঠিন্য (Difficulty)" : "All Difficulties"}</option>
-            <option value="EASY">{t.exam.easy}</option>
-            <option value="MEDIUM">{t.exam.medium}</option>
-            <option value="HARD">{t.exam.hard}</option>
-          </select>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>ফিল্টার রিসেট</span>
+          </button>
         </div>
 
-        {/* Category Pill Filters */}
+        {/* Category Pills */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
           <span className="font-semibold text-slate-500 mr-1 flex items-center gap-1 shrink-0">
             <Filter className="w-3.5 h-3.5" />
-            <span>{t.common.filter}:</span>
+            <span>ক্যাটাগরি:</span>
           </span>
           {categories.map((c) => (
             <button
               key={c.value}
               onClick={() => {
                 setCategory(c.value);
+                setSubjectId("");
+                setPaperId("");
+                setChapterId("");
                 setPage(1);
               }}
-              className={`px-3 py-1.5 rounded-full font-medium transition shrink-0 cursor-pointer ${
+              className={`px-3.5 py-1.5 rounded-full font-medium transition shrink-0 cursor-pointer ${
                 category === c.value
-                  ? "bg-emerald-600 text-white font-semibold"
+                  ? "bg-emerald-600 text-white font-semibold shadow-2xs"
                   : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
@@ -176,134 +275,341 @@ function QuestionBankContent() {
             </button>
           ))}
         </div>
+
+        {/* Multi-Dimensional Dropdown Selectors */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1 text-xs">
+          {/* Subject Filter */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">বিষয় (Subject)</label>
+            <select
+              value={subjectId}
+              onChange={(e) => {
+                setSubjectId(e.target.value);
+                setPaperId("");
+                setChapterId("");
+                setPage(1);
+              }}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
+            >
+              <option value="">সকল বিষয়</option>
+              {subjects
+                .filter((s) => !category || s.category === category)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nameBn}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {/* Paper Filter (For HSC) */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">পত্র (Paper)</label>
+            <select
+              value={paperId}
+              disabled={availablePapers.length === 0}
+              onChange={(e) => {
+                setPaperId(e.target.value);
+                setPage(1);
+              }}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600 disabled:opacity-50"
+            >
+              <option value="">সকল পত্র</option>
+              {availablePapers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nameBn}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Chapter Filter */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">অধ্যায় (Chapter)</label>
+            <select
+              value={chapterId}
+              disabled={!subjectId}
+              onChange={(e) => {
+                setChapterId(e.target.value);
+                setPage(1);
+              }}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600 disabled:opacity-50"
+            >
+              <option value="">সকল অধ্যায়</option>
+              {availableChapters.map((c) => (
+                <option key={c.id} value={c.id}>
+                  অধ্যায় {c.chapterNum}: {c.nameBn}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Board Filter */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">শিক্ষা বোর্ড (Board)</label>
+            <select
+              value={boardId}
+              onChange={(e) => {
+                setBoardId(e.target.value);
+                setPage(1);
+              }}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
+            >
+              <option value="">সকল বোর্ড</option>
+              {boards.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.nameBn}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Year Filter */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">পরীক্ষার সাল (Year)</label>
+            <select
+              value={year}
+              onChange={(e) => {
+                setYear(e.target.value);
+                setPage(1);
+              }}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
+            >
+              <option value="">সকল সাল</option>
+              {yearsList.map((y) => (
+                <option key={y} value={y}>
+                  {formatNumber(y)} সাল
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Question Type Filter (MCQ / CQ) */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">ধরণ (Type)</label>
+            <select
+              value={type}
+              onChange={(e) => {
+                setType(e.target.value);
+                setPage(1);
+              }}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
+            >
+              <option value="">সকল ধরণের প্রশ্ন</option>
+              <option value="MCQ">বহুনির্বাচনি (MCQ)</option>
+              <option value="CQ">সৃজনশীল (CQ)</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Results Header */}
       <div className="flex justify-between items-center text-xs text-slate-500 px-1">
         <span>
-          {locale === "bn" ? `মোট ${totalCount} টি প্রশ্ন সংরক্ষিত রয়েছে` : `Total ${totalCount} questions found`}
+          {locale === "bn"
+            ? `মোট ${formatNumber(totalCount)} টি প্রশ্ন সংরক্ষিত রয়েছে`
+            : `Total ${totalCount} questions found`}
         </span>
         <span>
-          {locale === "bn" ? `পৃষ্ঠা ${page} এর ${totalPages}` : `Page ${page} of ${totalPages}`}
+          {locale === "bn"
+            ? `পৃষ্ঠা ${formatNumber(page)} এর ${formatNumber(totalPages)}`
+            : `Page ${page} of ${totalPages}`}
         </span>
       </div>
 
       {/* Questions List */}
       {loading ? (
-        <div className="text-center py-16 text-slate-500">{t.common.loading}</div>
+        <div className="text-center py-20 text-slate-500 space-y-3">
+          <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-medium">প্রশ্নমালা লোড হচ্ছে...</p>
+        </div>
       ) : questions.length === 0 ? (
-        <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-2">
-          <p className="text-slate-700 font-semibold text-base">{t.common.empty}</p>
-          <p className="text-xs text-slate-500">{t.common.emptyStateSub}</p>
+        <div className="bg-white p-16 rounded-2xl border border-slate-200 text-center space-y-3">
+          <BookOpen className="w-12 h-12 text-slate-300 mx-auto" />
+          <p className="text-slate-800 font-bold text-lg">কোনো প্রশ্ন পাওয়া যায়নি</p>
+          <p className="text-sm text-slate-500 max-w-sm mx-auto">
+            আপনার নির্বাচিত ফিল্টার বা অনুসন্ধানের সাথে মিল রেখে কোনো প্রশ্ন পাওয়া যায়নি। অন্য ফিল্টার দিয়ে চেষ্টা করুন।
+          </p>
+          <button
+            onClick={handleResetFilters}
+            className="mt-2 px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 transition"
+          >
+            সব ফিল্টার সাফ করুন
+          </button>
         </div>
       ) : (
         <div className="space-y-4">
           {questions.map((q, idx) => {
             const isExpanded = expandedSolutions[q.id];
             const qNum = (page - 1) * 10 + idx + 1;
+            const isCQ = q.type === "CQ";
 
             return (
               <div
                 key={q.id}
-                className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200 shadow-xs space-y-4"
+                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4 hover:border-slate-300 transition"
               >
-                {/* Meta Badges */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                {/* Meta Badges & Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-md">
-                      #{qNum}
+                      #{formatNumber(qNum)}
                     </span>
-                    <span className="font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-                      {q.subject.nameBn}
+                    <span className="font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
+                      {q.subject.nameBn} {q.paper && `(${q.paper.nameBn})`}
                     </span>
-                    <span className="text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md">
-                      {q.chapter.nameBn}
+                    <span className="text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-md">
+                      অধ্যায় {formatNumber(q.chapter.chapterNum)}: {q.chapter.nameBn}
                     </span>
-                    <span className={`px-2 py-0.5 rounded-md font-medium ${
-                      q.difficulty === "HARD"
-                        ? "bg-rose-50 text-rose-700"
-                        : q.difficulty === "MEDIUM"
-                        ? "bg-amber-50 text-amber-700"
-                        : "bg-emerald-50 text-emerald-700"
-                    }`}>
-                      {q.difficulty}
+                    <span
+                      className={`px-2.5 py-0.5 rounded-md font-semibold ${
+                        isCQ ? "bg-purple-50 text-purple-800 border border-purple-200" : "bg-blue-50 text-blue-800 border border-blue-200"
+                      }`}
+                    >
+                      {isCQ ? "সৃজনশীল (CQ)" : "বহুনির্বাচনি (MCQ)"}
+                    </span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-md font-medium ${
+                        q.difficulty === "HARD"
+                          ? "bg-rose-50 text-rose-700"
+                          : q.difficulty === "MEDIUM"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {q.difficulty === "EASY" ? "সহজ" : q.difficulty === "HARD" ? "কঠিন" : "মাঝারি"}
                     </span>
                   </div>
 
-                  {/* Board / Year References */}
-                  {q.references && q.references.length > 0 && (
-                    <div className="flex items-center gap-1 text-slate-500 font-medium">
-                      <Tag className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{q.references[0].examSessionName || `${q.references[0].examYear}`}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Question Text */}
-                <div className="text-base sm:text-lg font-medium text-slate-900 leading-relaxed">
-                  <MathText text={q.questionTextBn} />
-                </div>
-
-                {/* Options Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  {q.options.map((opt) => (
-                    <div
-                      key={opt.id}
-                      className={`p-3 rounded-lg border text-sm flex items-center gap-3 ${
-                        isExpanded && opt.isCorrect
-                          ? "border-emerald-500 bg-emerald-50/70 text-emerald-900 font-semibold"
-                          : "border-slate-200 bg-slate-50/50 text-slate-800"
-                      }`}
-                    >
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
-                        isExpanded && opt.isCorrect
-                          ? "bg-emerald-600 text-white"
-                          : "bg-white border border-slate-300 text-slate-700"
-                      }`}>
-                        {opt.optionKey}
-                      </span>
-                      <div>
-                        <MathText text={opt.textBn} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Solution Toggle Accordion */}
-                <div className="pt-2">
-                  <button
-                    onClick={() => toggleSolution(q.id)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer"
-                  >
-                    <span>{isExpanded ? (locale === "bn" ? "সমাধান লুকান" : "Hide Explanation") : t.exam.detailedSolutions}</span>
-                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </button>
-
-                  {isExpanded && q.answer && (
-                    <div className="mt-3 p-4 rounded-xl bg-emerald-50/50 border border-emerald-200 text-xs sm:text-sm space-y-2 text-slate-800 animate-fadeIn">
-                      <div className="flex items-center gap-2 font-bold text-emerald-900">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <div className="flex items-center gap-2">
+                    {/* Board Reference Badge */}
+                    {q.references && q.references.length > 0 && (
+                      <div className="flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md text-xs font-semibold border border-indigo-100">
+                        <GraduationCap className="w-3.5 h-3.5" />
                         <span>
-                          {locale === "bn" ? `সঠিক উত্তর: (${q.answer.correctKey})` : `Correct Answer: (${q.answer.correctKey})`}
+                          {`${q.references[0].board?.nameBn || "বোর্ড"} '${formatNumber(q.references[0].examYear)}`}
                         </span>
                       </div>
-                      <div className="leading-relaxed">
-                        <strong>{t.exam.explanation}:</strong> <MathText text={q.answer.explanationBn} />
-                      </div>
-                      {q.textbookRef && (
-                        <div className="text-slate-500 text-xs pt-1 flex items-center gap-1.5">
-                          <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{t.exam.textbookReference}: {q.textbookRef}</span>
-                        </div>
-                      )}
-                      {q.teacherTipsBn && (
-                        <div className="text-amber-800 bg-amber-50/70 p-2 rounded-md text-xs mt-1 border border-amber-200">
-                          <strong>{t.exam.teacherTips}:</strong> {q.teacherTipsBn}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    )}
+
+                    {/* Bookmark Toggle */}
+                    <button
+                      onClick={() => handleToggleBookmark(q.id)}
+                      className={`p-1.5 rounded-lg border transition ${
+                        q.isBookmarked
+                          ? "bg-amber-50 text-amber-600 border-amber-200"
+                          : "text-slate-400 border-slate-200 hover:text-slate-600 hover:bg-slate-50"
+                      }`}
+                      title={q.isBookmarked ? "বুকমার্ক সরানো" : "বুকমার্ক করুন"}
+                    >
+                      {q.isBookmarked ? <BookmarkCheck className="w-4 h-4 text-amber-600" /> : <Bookmark className="w-4 h-4" />}
+                    </button>
+
+                    {/* Detail Page Link */}
+                    <Link
+                      href={`/questions/${q.id}`}
+                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200 transition"
+                      title="প্রশ্নের বিস্তারিত পৃষ্ঠা দেখুন"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </Link>
+                  </div>
                 </div>
+
+                {/* Question Body */}
+                {isCQ ? (
+                  /* Creative Question (CQ) Preview */
+                  <div className="space-y-3">
+                    {q.stemBn && (
+                      <div className="p-3.5 bg-amber-50/50 rounded-xl border border-amber-200/60 text-slate-800 text-sm leading-relaxed whitespace-pre-line">
+                        <span className="font-bold text-amber-900 block mb-1">উদ্দীপক:</span>
+                        <MathText text={q.stemBn} />
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span className="font-semibold text-purple-900 bg-purple-50 px-2 py-1 rounded-md">
+                        {q.subparts?.length || 4} টি উপপ্রশ্ন [ক, খ, গ, ঘ] • মোট নম্বর: {formatNumber(q.marks || 10)}
+                      </span>
+                      <Link
+                        href={`/questions/${q.id}`}
+                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+                      >
+                        <span>সম্পূর্ণ সৃজনশীল প্রশ্ন ও সমাধান দেখুন</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+                ) : (
+                  /* MCQ Question Text & Options */
+                  <div className="space-y-4">
+                    <div className="text-base sm:text-lg font-semibold text-slate-900 leading-relaxed">
+                      <MathText text={q.questionTextBn} />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {q.options.map((opt) => (
+                        <div
+                          key={opt.id}
+                          className={`p-3 rounded-xl border text-sm flex items-center gap-3 ${
+                            isExpanded && opt.isCorrect
+                              ? "border-emerald-500 bg-emerald-50/70 text-emerald-900 font-semibold"
+                              : "border-slate-200 bg-slate-50/50 text-slate-800"
+                          }`}
+                        >
+                          <span
+                            className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isExpanded && opt.isCorrect
+                                ? "bg-emerald-600 text-white"
+                                : "bg-white border border-slate-300 text-slate-700"
+                            }`}
+                          >
+                            {opt.optionKey}
+                          </span>
+                          <div className="pt-0.5">
+                            <MathText text={opt.textBn} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Inline Explanation Toggle for MCQ */}
+                    <div className="pt-1 flex items-center justify-between">
+                      <button
+                        onClick={() => toggleSolution(q.id)}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer"
+                      >
+                        <span>{isExpanded ? "ব্যাখ্যা লুকান" : "সঠিক উত্তর ও ব্যাখ্যা দেখুন"}</span>
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+
+                      <Link
+                        href={`/questions/${q.id}`}
+                        className="text-xs text-slate-500 hover:text-emerald-700 flex items-center gap-1 font-medium"
+                      >
+                        <span>অনুশীলন মোডে খুলুন</span>
+                        <ArrowRight className="w-3 h-3" />
+                      </Link>
+                    </div>
+
+                    {isExpanded && q.answer && (
+                      <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200 text-xs sm:text-sm space-y-2 text-slate-800">
+                        <div className="flex items-center gap-2 font-bold text-emerald-900">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>সঠিক উত্তর: ({q.answer.correctKey})</span>
+                        </div>
+                        <div className="leading-relaxed whitespace-pre-line">
+                          <strong>ব্যাখ্যা:</strong> <MathText text={q.answer.explanationBn} />
+                        </div>
+                        {q.textbookRef && (
+                          <div className="text-slate-600 text-xs pt-1 flex items-center gap-1.5">
+                            <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+                            <span>পাঠ্যবই রেফারেন্স: {q.textbookRef}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -316,19 +622,19 @@ function QuestionBankContent() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed bg-white"
+            className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed bg-white hover:bg-slate-50 transition"
           >
-            {t.exam.prev}
+            পূর্ববর্তী
           </button>
-          <span className="text-xs font-semibold text-slate-600">
-            {page} / {totalPages}
+          <span className="text-xs font-semibold text-slate-600 px-3">
+            {formatNumber(page)} / {formatNumber(totalPages)}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed bg-white"
+            className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed bg-white hover:bg-slate-50 transition"
           >
-            {t.exam.next}
+            পরবর্তী
           </button>
         </div>
       )}

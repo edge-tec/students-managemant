@@ -87,6 +87,23 @@ async function main() {
   });
   console.log("✓ Default accounts created: admin@edubd.ac, student@edubd.ac");
 
+  // 2.5 Academic Classes (SSC & HSC)
+  const classData = [
+    { code: "CLASS_9", nameEn: "Class 9", nameBn: "নবম শ্রেণি", orderIndex: 9 },
+    { code: "CLASS_10", nameEn: "Class 10", nameBn: "দশম শ্রেণি", orderIndex: 10 },
+    { code: "CLASS_11", nameEn: "Class 11", nameBn: "একাদশ শ্রেণি", orderIndex: 11 },
+    { code: "CLASS_12", nameEn: "Class 12", nameBn: "দ্বাদশ শ্রেণি", orderIndex: 12 },
+  ];
+
+  for (const c of classData) {
+    await prisma.academicClass.upsert({
+      where: { code: c.code },
+      update: {},
+      create: c,
+    });
+  }
+  console.log("✓ Academic classes (SSC & HSC) seeded");
+
   // 3. Examination Boards
   const boardsData = [
     { code: "DHA", nameEn: "Dhaka Board", nameBn: "ঢাকা শিক্ষা বোর্ড" },

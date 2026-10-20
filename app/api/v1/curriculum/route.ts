@@ -6,24 +6,48 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const categoryParam = searchParams.get("category");
+    const classIdParam = searchParams.get("classId");
 
-    const whereSubject: Record<string, unknown> = {};
+    const whereSubject: Record<string, unknown> = {
+      isActive: true,
+    };
+
     if (categoryParam && Object.values(ExamCategoryType).includes(categoryParam as ExamCategoryType)) {
       whereSubject.category = categoryParam as ExamCategoryType;
     }
 
-    const [subjects, boards, universities] = await Promise.all([
+    if (classIdParam) {
+      whereSubject.classId = classIdParam;
+    }
+
+    const [classes, subjects, boards, universities] = await Promise.all([
+      prisma.academicClass.findMany({
+        where: { isActive: true },
+        orderBy: { orderIndex: "asc" },
+      }),
       prisma.subject.findMany({
         where: whereSubject,
         include: {
-          papers: true,
+          academicClass: true,
+          papers: {
+            where: { isActive: true },
+            orderBy: { paperNumber: "asc" },
+          },
           chapters: {
+            where: { isActive: true },
             orderBy: { chapterNum: "asc" },
+            include: {
+              topics: {
+                where: { isActive: true },
+                orderBy: { orderIndex: "asc" },
+              },
+            },
           },
         },
         orderBy: { orderIndex: "asc" },
       }),
       prisma.examinationBoard.findMany({
+        where: { isActive: true },
         orderBy: { code: "asc" },
       }),
       prisma.university.findMany({
@@ -35,6 +59,7 @@ export async function GET(req: NextRequest) {
     ]);
 
     return NextResponse.json({
+      classes,
       subjects,
       boards,
       universities,
