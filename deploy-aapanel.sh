@@ -88,7 +88,7 @@ EOF
 
 # 6. Install Node dependencies & setup Prisma
 echo "[6/8] Installing dependencies and migrating database..."
-npm install
+npm install --legacy-peer-deps
 npx prisma generate
 npx prisma db push
 node scripts/seed.mjs
