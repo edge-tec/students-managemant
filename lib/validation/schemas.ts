@@ -192,5 +192,31 @@ export const ResolveQuestionReportSchema = z.object({
   adminNotes: z.string().max(1000).optional().nullable(),
 });
 
+export const PlanCreateSchema = z.object({
+  code: z.string().trim().min(2, "Plan code is required").max(50),
+  nameBn: z.string().trim().min(2, "Bangla name is required"),
+  nameEn: z.string().trim().min(2, "English name is required"),
+  descriptionBn: z.string().optional().nullable(),
+  descriptionEn: z.string().optional().nullable(),
+  priceBdt: z.number().min(0, "Price must be 0 or greater"),
+  durationDays: z.number().int().min(1, "Duration must be at least 1 day").default(30),
+  category: z.enum(["SSC", "HSC", "MEDICAL", "DENTAL", "UNIVERSITY"]).optional().nullable(),
+  features: z.array(z.string()).default([]),
+  isActive: z.boolean().default(true),
+});
+
+export const PlanUpdateSchema = z.object({
+  nameBn: z.string().trim().min(2).optional(),
+  nameEn: z.string().trim().min(2).optional(),
+  descriptionBn: z.string().optional().nullable(),
+  descriptionEn: z.string().optional().nullable(),
+  priceBdt: z.number().min(0).optional(),
+  durationDays: z.number().int().min(1).optional(),
+  category: z.enum(["SSC", "HSC", "MEDICAL", "DENTAL", "UNIVERSITY"]).optional().nullable(),
+  features: z.array(z.string()).optional(),
+  isActive: z.boolean().optional(),
+});
+
+
 
 

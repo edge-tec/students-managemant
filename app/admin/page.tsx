@@ -36,7 +36,8 @@ import { FinanceManager } from "@/components/admin/FinanceManager";
 import { AuditLogViewer } from "@/components/admin/AuditLogViewer";
 import { SettingsManager } from "@/components/admin/SettingsManager";
 import { PdfQuestionGeneratorManager } from "@/components/admin/PdfQuestionGeneratorManager";
-import { Sparkles } from "lucide-react";
+import { PlanManager } from "@/components/admin/PlanManager";
+import { Sparkles, Tag } from "lucide-react";
 
 interface AdminAnalytics {
   totalStudents: number;
@@ -81,6 +82,7 @@ type AdminTab =
   | "pdf-generator"
   | "import"
   | "finance"
+  | "plans"
   | "audit"
   | "settings";
 
@@ -210,6 +212,7 @@ export default function AdminDashboardPage() {
     { id: "pdf-generator", label: "পিডিএফ এআই প্রশ্ন জেনারেটর", icon: Sparkles },
     { id: "import", label: "বাল্ক CSV ইম্পোর্ট", icon: Upload },
     { id: "finance", label: "পেমেন্ট ও রাজস্ব", icon: CreditCard, badge: analytics?.pendingPaymentsCount },
+    { id: "plans", label: "প্যাকেজ ও মূল্য প্ল্যান", icon: Tag },
     { id: "audit", label: "অডিট ট্রেইল", icon: History },
     { id: "settings", label: "পলিসি ও সেটিংস", icon: Settings },
   ];
@@ -592,10 +595,13 @@ HSC,PHY_1,2,"একটি ভেক্টরের মান ১০ ও দি�
       {/* TAB 8: FINANCE & PAYMENTS */}
       {activeTab === "finance" && <FinanceManager />}
 
-      {/* TAB 9: AUDIT TRAIL */}
+      {/* TAB 9: SUBSCRIPTION PLANS & PACKAGES */}
+      {activeTab === "plans" && <PlanManager />}
+
+      {/* TAB 10: AUDIT TRAIL */}
       {activeTab === "audit" && <AuditLogViewer />}
 
-      {/* TAB 10: SETTINGS & POLICIES */}
+      {/* TAB 11: SETTINGS & POLICIES */}
       {activeTab === "settings" && <SettingsManager />}
     </div>
   );
