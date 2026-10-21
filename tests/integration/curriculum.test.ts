@@ -105,6 +105,20 @@ describe("Curriculum Management Integration Tests", () => {
     expect(chapters[0].nameBn).toBe("ল্যাবরেটরির নিরাপদ ব্যবহার");
   });
 
+  it("should default category to HSC when creating subject without category", async () => {
+    const testCode = "TEST_DEFAULT_CAT_" + Date.now();
+    const subject = await CurriculumService.createSubject({
+      code: testCode,
+      nameBn: "ডিফল্ট ক্যাটাগরি বিষয়",
+    });
+    expect(subject).toBeDefined();
+    expect(subject.category).toBe(ExamCategoryType.HSC);
+    expect(subject.nameEn).toBe(testCode);
+
+    // Clean up
+    await prisma.subject.delete({ where: { id: subject.id } });
+  });
+
   it("should enforce safe deletion guard when deleting subject with chapters", async () => {
     const subject = await prisma.subject.findFirst({ where: { code: testSubjectCode } });
     expect(subject).toBeDefined();

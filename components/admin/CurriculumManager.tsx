@@ -49,7 +49,7 @@ interface Subject {
   code: string;
   nameBn: string;
   nameEn: string;
-  category: "SSC" | "HSC" | "MEDICAL" | "UNIVERSITY";
+  category: "SSC" | "HSC" | "MEDICAL" | "DENTAL" | "UNIVERSITY" | "MODEL_TEST" | string;
   classId?: string | null;
   class?: { nameBn: string };
   academicClass?: { id: string; code: string; nameBn: string; nameEn: string } | null;
@@ -407,7 +407,11 @@ export function CurriculumManager() {
     const payload = {
       entity,
       ...formData,
-      ...(entity === "chapter" ? { subjectId: selectedSubjectId } : {}),
+      ...(entity === "subject" ? { category: formData.category || "HSC" } : {}),
+      ...(entity === "chapter" ? { 
+        subjectId: selectedSubjectId,
+        chapterNum: formData.chapterNum ?? 1,
+      } : {}),
     };
 
     try {
@@ -587,7 +591,15 @@ export function CurriculumManager() {
           ) : activeTab === "enrollments" ? null : (
             <button
               onClick={() => {
-                setFormData({});
+                const initialData: Record<string, any> = {};
+                if (activeTab === "subjects") {
+                  initialData.category = subjectCategoryFilter || "HSC";
+                  if (subjectClassFilter) initialData.classId = subjectClassFilter;
+                  if (subjectGroupFilter) initialData.groupId = subjectGroupFilter;
+                } else if (activeTab === "chapters") {
+                  initialData.chapterNum = 1;
+                }
+                setFormData(initialData);
                 setShowAddModal(true);
               }}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition shadow-xs"
@@ -721,7 +733,9 @@ export function CurriculumManager() {
                 <option value="HSC">HSC</option>
                 <option value="SSC">SSC</option>
                 <option value="MEDICAL">MEDICAL</option>
+                <option value="DENTAL">DENTAL</option>
                 <option value="UNIVERSITY">UNIVERSITY</option>
+                <option value="MODEL_TEST">MODEL_TEST</option>
               </select>
 
               <select
@@ -1490,7 +1504,9 @@ export function CurriculumManager() {
                       <option value="HSC">HSC</option>
                       <option value="SSC">SSC</option>
                       <option value="MEDICAL">MEDICAL</option>
+                      <option value="DENTAL">DENTAL</option>
                       <option value="UNIVERSITY">UNIVERSITY</option>
+                      <option value="MODEL_TEST">MODEL_TEST</option>
                     </select>
                   </div>
                   <div>
@@ -1711,7 +1727,9 @@ export function CurriculumManager() {
                       <option value="HSC">HSC</option>
                       <option value="SSC">SSC</option>
                       <option value="MEDICAL">MEDICAL</option>
+                      <option value="DENTAL">DENTAL</option>
                       <option value="UNIVERSITY">UNIVERSITY</option>
+                      <option value="MODEL_TEST">MODEL_TEST</option>
                     </select>
                   </div>
 

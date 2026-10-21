@@ -203,24 +203,36 @@ export class CurriculumService {
 
   static async createSubject(data: {
     code: string;
-    nameEn: string;
+    nameEn?: string;
     nameBn: string;
-    category: ExamCategoryType;
+    category?: ExamCategoryType;
     classId?: string | null;
     groupId?: string | null;
     orderIndex?: number;
   }) {
+    if (!data.code || !data.code.trim()) {
+      throw new Error("Subject code is required.");
+    }
+    if (!data.nameBn || !data.nameBn.trim()) {
+      throw new Error("Subject name (Bengali) is required.");
+    }
     const cleanCode = data.code.trim();
     const existing = await prisma.subject.findUnique({ where: { code: cleanCode } });
     if (existing) {
       throw new Error(`Subject with code '${cleanCode}' already exists.`);
     }
+
+    const validCategory =
+      data.category && Object.values(ExamCategoryType).includes(data.category as ExamCategoryType)
+        ? (data.category as ExamCategoryType)
+        : ExamCategoryType.HSC;
+
     return prisma.subject.create({
       data: {
         code: cleanCode,
-        nameEn: data.nameEn.trim(),
+        nameEn: data.nameEn ? data.nameEn.trim() : cleanCode,
         nameBn: data.nameBn.trim(),
-        category: data.category,
+        category: validCategory,
         classId: data.classId || null,
         groupId: data.groupId || null,
         orderIndex: data.orderIndex ?? 0,
@@ -244,7 +256,11 @@ export class CurriculumService {
     const updateData: Record<string, unknown> = {};
     if (data.nameEn !== undefined) updateData.nameEn = data.nameEn.trim();
     if (data.nameBn !== undefined) updateData.nameBn = data.nameBn.trim();
-    if (data.category !== undefined) updateData.category = data.category;
+    if (data.category !== undefined && data.category !== null) {
+      if (Object.values(ExamCategoryType).includes(data.category as ExamCategoryType)) {
+        updateData.category = data.category;
+      }
+    }
     if (data.classId !== undefined) updateData.classId = data.classId || null;
     if (data.groupId !== undefined) updateData.groupId = data.groupId || null;
     if (data.orderIndex !== undefined) updateData.orderIndex = data.orderIndex;
@@ -358,21 +374,25 @@ export class CurriculumService {
   static async createChapter(data: {
     subjectId: string;
     paperId?: string;
-    chapterNum: number;
-    nameEn: string;
+    chapterNum?: number;
+    nameEn?: string;
     nameBn: string;
     description?: string;
     orderIndex?: number;
   }) {
+    if (!data.subjectId) {
+      throw new Error("Subject ID is required for creating a chapter.");
+    }
+    const chapterNum = Number(data.chapterNum) || 1;
     return prisma.chapter.create({
       data: {
         subjectId: data.subjectId,
         paperId: data.paperId || null,
-        chapterNum: data.chapterNum,
-        nameEn: data.nameEn,
-        nameBn: data.nameBn,
+        chapterNum,
+        nameEn: data.nameEn ? data.nameEn.trim() : `Chapter ${chapterNum}`,
+        nameBn: data.nameBn ? data.nameBn.trim() : `অধ্যায় ${chapterNum}`,
         description: data.description || null,
-        orderIndex: data.orderIndex ?? data.chapterNum,
+        orderIndex: data.orderIndex ?? chapterNum,
       },
     });
   }

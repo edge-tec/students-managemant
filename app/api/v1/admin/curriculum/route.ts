@@ -91,6 +91,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, item: result }, { status: 201 });
       }
       case "subject": {
+        if (!payload.category) {
+          payload.category = "HSC";
+        }
         const result = await CurriculumService.createSubject(payload);
         return NextResponse.json({ success: true, item: result }, { status: 201 });
       }
@@ -99,6 +102,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, item: result }, { status: 201 });
       }
       case "chapter": {
+        if (payload.chapterNum === undefined || payload.chapterNum === null) {
+          payload.chapterNum = 1;
+        }
         const result = await CurriculumService.createChapter(payload);
         return NextResponse.json({ success: true, item: result }, { status: 201 });
       }
