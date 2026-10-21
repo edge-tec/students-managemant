@@ -52,11 +52,15 @@ rm -rf .next
 npm run build
 
 # Detect target port from aaPanel Nginx reverse proxy config if present, default to 3005
-NGINX_PROXY_PORT=$(grep -rh "proxy_pass http://127.0.0.1:" /www/server/panel/vhost/nginx/proxy/${DOMAIN}/ 2>/dev/null | grep -oE '[0-9]+' | head -n1 || true)
-if [ -z "$NGINX_PROXY_PORT" ]; then
-    NGINX_PROXY_PORT=$(grep -rh "proxy_pass http://127.0.0.1:" /www/server/panel/vhost/nginx/${DOMAIN}*.conf 2>/dev/null | grep -oE '[0-9]+' | head -n1 || true)
+NGINX_PROXY_PORT=$(grep -rh "proxy_pass http://127.0.0.1:" /www/server/panel/vhost/nginx/proxy/${DOMAIN}/ 2>/dev/null | grep -oE ':[0-9]+' | tr -d ':' | head -n1 || true)
+if [ -z "$NGINX_PROXY_PORT" ] || [ "$NGINX_PROXY_PORT" -lt 1024 ] 2>/dev/null; then
+    NGINX_PROXY_PORT=$(grep -rh "proxy_pass http://127.0.0.1:" /www/server/panel/vhost/nginx/${DOMAIN}*.conf 2>/dev/null | grep -oE ':[0-9]+' | tr -d ':' | head -n1 || true)
 fi
-TARGET_PORT="${NGINX_PROXY_PORT:-3005}"
+if [ -z "$NGINX_PROXY_PORT" ] || [ "$NGINX_PROXY_PORT" -lt 1024 ] 2>/dev/null; then
+    TARGET_PORT="3005"
+else
+    TARGET_PORT="$NGINX_PROXY_PORT"
+fi
 
 echo "[7/7] Freeing ports (3005, 3006) and restarting PM2 daemon on port ${TARGET_PORT}..."
 # Ensure PM2 is installed
