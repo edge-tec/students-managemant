@@ -44,9 +44,24 @@ function AdminLoginForm() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      }
 
       if (!res.ok) {
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(
+            locale === "bn"
+              ? "সার্ভার সাময়িকভাবে সংযোগ বিচ্ছিন্ন (502 Bad Gateway)। অনুগ্রহ করে PM2 সার্ভিস স্ট্যাটাস চেক করুন।"
+              : "Backend service unreachable (502 Bad Gateway). Please check PM2 server status."
+          );
+        }
         if (res.status === 429) {
           throw new Error(
             locale === "bn"
@@ -55,7 +70,7 @@ function AdminLoginForm() {
           );
         }
         throw new Error(
-          data.error ||
+          data?.error ||
             (locale === "bn"
               ? "ইমেইল বা পাসওয়ার্ড সঠিক নয় অথবা আপনার অ্যাকাউন্ট প্রশাসনিক অনুমোদিত নয়।"
               : "Invalid email or password.")

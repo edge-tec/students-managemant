@@ -1,8 +1,10 @@
+const path = require("path");
+
 module.exports = {
   apps: [
     {
       name: "m.eliteali.com",
-      script: "server.js",
+      script: path.join(__dirname, "server.js"),
       cwd: __dirname,
       instances: 1,
       exec_mode: "fork",

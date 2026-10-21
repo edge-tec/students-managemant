@@ -26,19 +26,54 @@ function LoginContent() {
       const res = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Login failed");
+      let data: any = null;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
       }
 
-      router.push(redirectUrl);
+      if (!res.ok) {
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(
+            locale === "bn"
+              ? "সার্ভার সাময়িকভাবে সংযোগ বিচ্ছিন্ন (502 Bad Gateway)। সার্ভার ও PM2 স্ট্যাটাস চেক করুন।"
+              : "Server connection failed (502 Bad Gateway). Please ensure the backend service is running."
+          );
+        }
+        if (res.status === 429) {
+          throw new Error(
+            locale === "bn"
+              ? "অতিরিক্ত লগইন চেষ্টার কারণে সাময়িকভাবে বন্ধ। কিছুক্ষণ পর চেষ্টা করুন।"
+              : "Too many login attempts. Please try again later."
+          );
+        }
+        throw new Error(
+          data?.error ||
+            (locale === "bn"
+              ? "ইমেইল বা পাসওয়ার্ড সঠিক নয়।"
+              : "Invalid email or password.")
+        );
+      }
+
+      // Check if user is an admin/staff and route appropriately
+      const isStaff =
+        data?.user?.roles?.includes("ADMIN") ||
+        data?.user?.roles?.includes("SUPER_ADMIN");
+      const destination =
+        redirectUrl === "/dashboard" && isStaff ? "/admin" : redirectUrl;
+
+      router.push(destination);
       router.refresh();
     } catch (err: unknown) {
       const error = err as Error;
-      setErrorMessage(error.message);
+      setErrorMessage(error.message || "An unexpected error occurred.");
       setLoading(false);
     }
   };

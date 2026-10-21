@@ -36,16 +36,32 @@ export default function RegisterPage() {
         }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || "Registration failed");
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(
+            locale === "bn"
+              ? "সার্ভার সাময়িকভাবে সংযোগ বিচ্ছিন্ন (502 Bad Gateway)। অনুগ্রহ করে সার্ভিস চালু আছে কিনা নিশ্চিত করুন।"
+              : "Server connection failed (502 Bad Gateway). Please try again shortly."
+          );
+        }
+        throw new Error(data?.error || "Registration failed");
       }
 
       router.push("/dashboard");
       router.refresh();
     } catch (err: unknown) {
       const error = err as Error;
-      setErrorMessage(error.message);
+      setErrorMessage(error.message || "Registration failed. Please try again.");
       setLoading(false);
     }
   };

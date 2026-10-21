@@ -106,6 +106,8 @@ npm run build
 # 8. Start with PM2
 echo "[8/8] Starting PM2 process manager..."
 npm install -g pm2
+fuser -k 3006/tcp 2>/dev/null || true
+lsof -ti:3006 | xargs kill -9 2>/dev/null || true
 pm2 delete "${DOMAIN}" 2>/dev/null || true
 pm2 start ecosystem.config.cjs
 pm2 save
