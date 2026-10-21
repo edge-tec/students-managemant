@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -e
+
+# ==============================================================================
+# Students Management & AI Educational Platform - Automated aaPanel Installer
+# Domain: app.eliteali.com
+# Database: student_manage (user: student_manage, pass: student_manage)
+# ==============================================================================
+
+echo "=========================================================="
+echo " Starting Automated Installation for app.eliteali.com"
+echo "=========================================================="
+
+# 1. System packages
+echo "[1/8] Updating system & installing dependencies..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y poppler-utils tesseract-ocr tesseract-ocr-ben tesseract-ocr-eng git postgresql postgresql-contrib curl
+
+# 2. Check Node.js (Require Node 20 LTS if missing or old)
+echo "[2/8] Checking Node.js environment..."
+if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d'.' -f1 | tr -d 'v')" -lt 18 ]; then
+    echo "Installing Node.js 20 LTS..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y nodejs
+fi
+echo "Node version: $(node -v)"
+echo "NPM version: $(npm -v)"
+
+# 3. Setup PostgreSQL
+echo "[3/8] Configuring PostgreSQL database..."
+systemctl enable postgresql
+systemctl start postgresql
+
+# Create database and user if not exists
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'student_manage'" | grep -q 1 || \
+    sudo -u postgres psql -c "CREATE DATABASE student_manage;"
+
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'student_manage'" | grep -q 1 || \
+    sudo -u postgres psql -c "CREATE USER student_manage WITH ENCRYPTED PASSWORD 'student_manage';"
+
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE student_manage TO student_manage;"
+sudo -u postgres psql -c "ALTER DATABASE student_manage OWNER TO student_manage;"
+
+# 4. Clone or update repository
+echo "[4/8] Setting up project directory at /www/wwwroot/app.eliteali.com..."
+mkdir -p /www/wwwroot
+TARGET_DIR="/www/wwwroot/app.eliteali.com"
+
+if [ -d "$TARGET_DIR/.git" ]; then
+    echo "Directory exists. Pulling latest code..."
+    cd "$TARGET_DIR"
+    git fetch origin main
+    git reset --hard origin/main
+else
+    echo "Cloning repository from GitHub..."
+    rm -rf "$TARGET_DIR"
+    git clone https://github.com/edge-tec/students-managemant.git "$TARGET_DIR"
+    cd "$TARGET_DIR"
+fi
+
+# 5. Create production .env
+echo "[5/8] Creating production .env file..."
+cat << 'EOF' > .env
+DATABASE_URL="postgresql://student_manage:student_manage@127.0.0.1:5432/student_manage?schema=public"
+JWT_SECRET="eliteali_jwt_secret_production_key_9876543210"
+NEXTAUTH_SECRET="eliteali_nextauth_production_key_0123456789"
+NEXT_PUBLIC_APP_URL="https://app.eliteali.com"
+NEXT_PUBLIC_DEFAULT_LOCALE="bn"
+GEMINI_API_KEY=""
+UPLOAD_DIR="./uploads"
+EOF
+
+# 6. Install Node dependencies & setup Prisma
+echo "[6/8] Installing dependencies and migrating database..."
+npm install
+npx prisma generate
+npx prisma db push
+node scripts/seed.mjs
+node scripts/provision-admin.mjs --email="admin@eliteali.com" --name="EliteAli Admin" --password="AdminPassword2026!" --reset-password
+
+mkdir -p uploads/pdfs
+chmod -R 775 uploads
+
+# 7. Build Next.js application
+echo "[7/8] Building Next.js application..."
+npm run build
+
+# 8. Start with PM2
+echo "[8/8] Starting PM2 process manager..."
+npm install -g pm2
+pm2 delete "app.eliteali.com" 2>/dev/null || true
+pm2 start ecosystem.config.cjs --name "app.eliteali.com"
+pm2 save
+
+echo "=========================================================="
+echo " INSTALLATION SUCCESSFUL!"
+echo " App running on http://127.0.0.1:3000"
+echo " Next steps in aaPanel:"
+echo " 1. Go to Website -> Add Site -> Domain: app.eliteali.com"
+echo " 2. Add Reverse Proxy -> Target URL: http://127.0.0.1:3000"
+echo " 3. Apply SSL certificate (Let's Encrypt)"
+echo " 4. Admin Login: https://app.eliteali.com/admin/login"
+echo "    Email: admin@eliteali.com"
+echo "    Password: AdminPassword2026!"
+echo "=========================================================="
