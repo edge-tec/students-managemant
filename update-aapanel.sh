@@ -34,6 +34,7 @@ git fetch origin main
 git reset --hard origin/main
 
 echo "[3/7] Updating dependencies..."
+systemctl start postgresql 2>/dev/null || service postgresql start 2>/dev/null || true
 npm install --legacy-peer-deps
 
 echo "[4/7] Regenerating Prisma Client & syncing database..."
@@ -47,9 +48,13 @@ echo "[6/7] Building Next.js application..."
 npm run build
 
 echo "[7/7] Freeing port 3006 and restarting PM2 daemon..."
+# Ensure PM2 is installed
+command -v pm2 >/dev/null 2>&1 || npm install -g pm2
+
 # Kill any orphaned processes holding port 3006
 fuser -k 3006/tcp 2>/dev/null || true
 lsof -ti:3006 | xargs kill -9 2>/dev/null || true
+kill -9 $(netstat -tlpn 2>/dev/null | grep :3006 | awk '{print $7}' | cut -d/ -f1) 2>/dev/null || true
 
 pm2 delete "${DOMAIN}" 2>/dev/null || true
 pm2 start ecosystem.config.cjs
