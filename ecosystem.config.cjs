@@ -1,9 +1,9 @@
 module.exports = {
   apps: [
     {
-      name: "students-management",
+      name: "app.eliteali.com",
       script: "npm",
-      args: "start",
+      args: "start -- -p 3005",
       cwd: "./",
       instances: 1,
       autorestart: true,
@@ -11,7 +11,7 @@ module.exports = {
       max_memory_restart: "1G",
       env: {
         NODE_ENV: "production",
-        PORT: 3000,
+        PORT: 3005,
       },
     },
   ],

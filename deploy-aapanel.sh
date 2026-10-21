@@ -105,15 +105,15 @@ npm run build
 echo "[8/8] Starting PM2 process manager..."
 npm install -g pm2
 pm2 delete "app.eliteali.com" 2>/dev/null || true
-pm2 start ecosystem.config.cjs --name "app.eliteali.com"
+pm2 start ecosystem.config.cjs
 pm2 save
 
 echo "=========================================================="
 echo " INSTALLATION SUCCESSFUL!"
-echo " App running on http://127.0.0.1:3000"
+echo " App running on http://127.0.0.1:3005"
 echo " Next steps in aaPanel:"
-echo " 1. Go to Website -> Add Site -> Domain: app.eliteali.com"
-echo " 2. Add Reverse Proxy -> Target URL: http://127.0.0.1:3000"
+echo " 1. Go to Website -> app.eliteali.com -> Reverse Proxy"
+echo " 2. Set Target URL to: http://127.0.0.1:3005"
 echo " 3. Apply SSL certificate (Let's Encrypt)"
 echo " 4. Admin Login: https://app.eliteali.com/admin/login"
 echo "    Email: admin@eliteali.com"
