@@ -129,6 +129,7 @@ export default function ExamHubPage() {
   }, [showLeaderboard, leaderboardCategory]);
 
   // Start exam from template
+  // Start exam from template
   const handleStartTemplateExam = async (templateId: string) => {
     setStartingTemplateId(templateId);
     setErrorMsg(null);
@@ -140,12 +141,23 @@ export default function ExamHubPage() {
         body: JSON.stringify({ templateId }),
       });
 
-      const data = await res.json();
+      if (res.status === 401) {
+        router.push(`/login?redirect=${encodeURIComponent("/exams")}`);
+        return;
+      }
+
+      let data: { error?: string; sessionId?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          locale === "bn"
+            ? `সার্ভারের সাথে সংযোগ স্থাপন করা সম্ভব হয়নি (স্ট্যাটাস: ${res.status})। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।`
+            : `Could not connect to the exam service (Status: ${res.status}). Please try again.`
+        );
+      }
+
       if (!res.ok) {
-        if (res.status === 401) {
-          router.push(`/login?redirect=${encodeURIComponent("/exams")}`);
-          return;
-        }
         throw new Error(data.error || "Failed to start exam");
       }
 
@@ -166,11 +178,26 @@ export default function ExamHubPage() {
       // Fetch available subject for the chosen category or default to HSC Physics
       const cat = selectedCategory !== "ALL" ? selectedCategory : "HSC";
       const curRes = await fetch(`/api/v1/curriculum?category=${cat}`);
-      const curData = await curRes.json();
+      
+      let curData: { subjects?: { id: string }[] } = {};
+      try {
+        curData = await curRes.json();
+      } catch {
+        throw new Error(
+          locale === "bn"
+            ? "সার্ভারের সাথে সংযোগ স্থাপন করা সম্ভব হয়নি। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।"
+            : "Could not load curriculum data. Please try again."
+        );
+      }
+
       const firstSubject = curData?.subjects?.[0];
 
       if (!firstSubject) {
-        throw new Error("No subject available for adaptive exam");
+        throw new Error(
+          locale === "bn"
+            ? "স্মার্ট ড্রিলের জন্য কোনো বিষয় পাওয়া যায়নি।"
+            : "No subject available for adaptive exam"
+        );
       }
 
       const res = await fetch("/api/v1/exams/create", {
@@ -188,12 +215,23 @@ export default function ExamHubPage() {
         }),
       });
 
-      const data = await res.json();
+      if (res.status === 401) {
+        router.push(`/login?redirect=${encodeURIComponent("/exams")}`);
+        return;
+      }
+
+      let data: { error?: string; sessionId?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          locale === "bn"
+            ? `সার্ভারের সাথে সংযোগ স্থাপন করা সম্ভব হয়নি (স্ট্যাটাস: ${res.status})। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।`
+            : `Could not connect to the exam service (Status: ${res.status}). Please try again.`
+        );
+      }
+
       if (!res.ok) {
-        if (res.status === 401) {
-          router.push(`/login?redirect=${encodeURIComponent("/exams")}`);
-          return;
-        }
         throw new Error(data.error || "Failed to create adaptive exam session");
       }
 
