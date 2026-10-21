@@ -46,6 +46,9 @@ node scripts/provision-admin.mjs --email="admin@eliteali.com" --name="EliteAli A
 node scripts/seed_authentic_questions.mjs || true
 
 echo "[6/7] Building Next.js application..."
+# Stop PM2 and clear stale build cache to prevent manifest corruption
+pm2 stop "${DOMAIN}" 2>/dev/null || true
+rm -rf .next
 npm run build
 
 # Detect target port from aaPanel Nginx reverse proxy config if present, default to 3005

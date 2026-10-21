@@ -102,6 +102,7 @@ chmod -R 775 uploads
 
 # 7. Build Next.js application
 echo "[7/8] Building Next.js application..."
+rm -rf .next
 npm run build
 
 # 8. Start with PM2

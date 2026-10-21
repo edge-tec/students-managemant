@@ -5,8 +5,16 @@ const next = require("next");
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
 const port = parseInt(process.env.PORT, 10) || 3005;
-const app = next({ dev, hostname, port });
+const app = next({ dev, hostname, port, dir: __dirname });
 const handle = app.getRequestHandler();
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("⚠️ Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("⚠️ Uncaught Exception:", err);
+});
 
 app
   .prepare()
