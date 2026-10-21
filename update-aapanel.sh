@@ -48,24 +48,33 @@ node scripts/seed_authentic_questions.mjs || true
 echo "[6/7] Building Next.js application..."
 npm run build
 
-echo "[7/7] Freeing port 3006 and restarting PM2 daemon..."
+# Detect target port from aaPanel Nginx reverse proxy config if present, default to 3005
+NGINX_PROXY_PORT=$(grep -rh "proxy_pass http://127.0.0.1:" /www/server/panel/vhost/nginx/proxy/${DOMAIN}/ 2>/dev/null | grep -oE '[0-9]+' | head -n1 || true)
+if [ -z "$NGINX_PROXY_PORT" ]; then
+    NGINX_PROXY_PORT=$(grep -rh "proxy_pass http://127.0.0.1:" /www/server/panel/vhost/nginx/${DOMAIN}*.conf 2>/dev/null | grep -oE '[0-9]+' | head -n1 || true)
+fi
+TARGET_PORT="${NGINX_PROXY_PORT:-3005}"
+
+echo "[7/7] Freeing ports (3005, 3006) and restarting PM2 daemon on port ${TARGET_PORT}..."
 # Ensure PM2 is installed
 command -v pm2 >/dev/null 2>&1 || npm install -g pm2
 
-# Kill any orphaned processes holding port 3006
+# Kill any orphaned processes holding port 3005 or 3006
+fuser -k 3005/tcp 2>/dev/null || true
 fuser -k 3006/tcp 2>/dev/null || true
+lsof -ti:3005 | xargs kill -9 2>/dev/null || true
 lsof -ti:3006 | xargs kill -9 2>/dev/null || true
-kill -9 $(netstat -tlpn 2>/dev/null | grep :3006 | awk '{print $7}' | cut -d/ -f1) 2>/dev/null || true
+kill -9 $(netstat -tlpn 2>/dev/null | grep -E ':3005|:3006' | awk '{print $7}' | cut -d/ -f1) 2>/dev/null || true
 
 pm2 delete "${DOMAIN}" 2>/dev/null || true
-pm2 start ecosystem.config.cjs
+PORT="${TARGET_PORT}" pm2 start ecosystem.config.cjs --update-env
 pm2 save
 
 echo "=========================================================="
-echo " Checking service health on port 3006..."
+echo " Checking service health on port ${TARGET_PORT}..."
 sleep 3
-if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3006 | grep -q "200\|307\|308\|404"; then
-    echo " SUCCESS: Application is running and responding on http://127.0.0.1:3006!"
+if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${TARGET_PORT} | grep -q "200\|307\|308\|404"; then
+    echo " SUCCESS: Application is running and responding on http://127.0.0.1:${TARGET_PORT}!"
 else
     echo "⚠️ Notice: Checking PM2 process status..."
     pm2 status

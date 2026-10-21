@@ -107,18 +107,21 @@ npm run build
 # 8. Start with PM2
 echo "[8/8] Starting PM2 process manager..."
 npm install -g pm2
+TARGET_PORT="3005"
+fuser -k 3005/tcp 2>/dev/null || true
 fuser -k 3006/tcp 2>/dev/null || true
+lsof -ti:3005 | xargs kill -9 2>/dev/null || true
 lsof -ti:3006 | xargs kill -9 2>/dev/null || true
 pm2 delete "${DOMAIN}" 2>/dev/null || true
-pm2 start ecosystem.config.cjs
+PORT="${TARGET_PORT}" pm2 start ecosystem.config.cjs --update-env
 pm2 save
 
 echo "=========================================================="
 echo " INSTALLATION SUCCESSFUL!"
-echo " App running on http://127.0.0.1:3006"
+echo " App running on http://127.0.0.1:${TARGET_PORT}"
 echo " Next steps in aaPanel:"
 echo " 1. Go to Website -> ${DOMAIN} -> Reverse Proxy"
-echo " 2. Set Target URL to: http://127.0.0.1:3006"
+echo " 2. Set Target URL to: http://127.0.0.1:${TARGET_PORT}"
 echo " 3. Apply SSL certificate (Let's Encrypt)"
 echo " 4. Admin Login: https://${DOMAIN}/admin/login"
 echo "    Email: admin@eliteali.com"
