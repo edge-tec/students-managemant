@@ -31,6 +31,9 @@ export async function GET(req: NextRequest) {
     const examYearParam = searchParams.get("year") || searchParams.get("examYear");
     const examYear = examYearParam ? parseInt(examYearParam, 10) : undefined;
 
+    const paperNumberParam = searchParams.get("paperNumber");
+    const paperNumber = paperNumberParam ? parseInt(paperNumberParam, 10) : undefined;
+
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "10", 10)));
     const search = searchParams.get("q") || searchParams.get("search") || undefined;
@@ -46,6 +49,7 @@ export async function GET(req: NextRequest) {
       category,
       subjectId: searchParams.get("subjectId") || undefined,
       paperId: searchParams.get("paperId") || undefined,
+      paperNumber,
       chapterId: searchParams.get("chapterId") || undefined,
       topicId: searchParams.get("topicId") || undefined,
       boardId: searchParams.get("boardId") || undefined,

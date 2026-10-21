@@ -41,8 +41,9 @@ echo "[4/7] Regenerating Prisma Client & syncing database..."
 npx prisma generate
 npx prisma db push --accept-data-loss || true
 
-echo "[5/7] Ensuring administrator account exists..."
+echo "[5/7] Ensuring administrator account exists & seeding authentic question bank..."
 node scripts/provision-admin.mjs --email="admin@eliteali.com" --name="EliteAli Admin" --password="edge2129" --reset-password || true
+node scripts/seed_authentic_questions.mjs || true
 
 echo "[6/7] Building Next.js application..."
 npm run build

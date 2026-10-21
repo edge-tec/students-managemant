@@ -67,6 +67,7 @@ export interface QuestionListFilters {
   classId?: string;
   subjectId?: string;
   paperId?: string;
+  paperNumber?: number;
   chapterId?: string;
   topicId?: string;
   boardId?: string;
@@ -562,6 +563,7 @@ export class QuestionService {
       category,
       subjectId,
       paperId,
+      paperNumber,
       chapterId,
       topicId,
       boardId,
@@ -579,8 +581,9 @@ export class QuestionService {
 
     const skip = (Math.max(1, page) - 1) * limit;
 
+    const andConditions: Record<string, unknown>[] = [];
+
     const where: Record<string, unknown> = {
-      ...(category ? { category } : {}),
       ...(subjectId ? { subjectId } : {}),
       ...(paperId ? { paperId } : {}),
       ...(chapterId ? { chapterId } : {}),
@@ -589,6 +592,16 @@ export class QuestionService {
       ...(type ? { type } : {}),
       ...(isPremium !== undefined ? { isPremium } : {}),
     };
+
+    if (!paperId && paperNumber) {
+      where.paper = { paperNumber };
+    }
+
+    if (category) {
+      andConditions.push({
+        OR: [{ category }, { subject: { category } }],
+      });
+    }
 
     // Public / Student vs Staff status visibility
     if (isStaff) {
@@ -610,12 +623,18 @@ export class QuestionService {
     // Unicode Bengali & English Search
     if (search && search.trim()) {
       const q = search.trim();
-      where.OR = [
-        { questionTextBn: { contains: q, mode: "insensitive" } },
-        { questionTextEn: { contains: q, mode: "insensitive" } },
-        { textbookRef: { contains: q, mode: "insensitive" } },
-        { tags: { some: { tag: { contains: q, mode: "insensitive" } } } },
-      ];
+      andConditions.push({
+        OR: [
+          { questionTextBn: { contains: q, mode: "insensitive" } },
+          { questionTextEn: { contains: q, mode: "insensitive" } },
+          { textbookRef: { contains: q, mode: "insensitive" } },
+          { tags: { some: { tag: { contains: q, mode: "insensitive" } } } },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     // Count and paginated query

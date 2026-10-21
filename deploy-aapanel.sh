@@ -94,6 +94,7 @@ npm install --legacy-peer-deps
 npx prisma generate
 npx prisma db push
 node scripts/seed.mjs
+node scripts/seed_authentic_questions.mjs
 node scripts/provision-admin.mjs --email="admin@eliteali.com" --name="EliteAli Admin" --password="edge2129" --reset-password
 
 mkdir -p uploads/pdfs

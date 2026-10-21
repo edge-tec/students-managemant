@@ -98,6 +98,7 @@ function QuestionBankContent() {
   const [category, setCategory] = useState(searchParams.get("category") || "");
   const [subjectId, setSubjectId] = useState(searchParams.get("subjectId") || "");
   const [paperId, setPaperId] = useState(searchParams.get("paperId") || "");
+  const [paperNumber, setPaperNumber] = useState(searchParams.get("paperNumber") || "");
   const [chapterId, setChapterId] = useState(searchParams.get("chapterId") || "");
   const [boardId, setBoardId] = useState(searchParams.get("boardId") || "");
   const [year, setYear] = useState(searchParams.get("year") || "");
@@ -116,10 +117,12 @@ function QuestionBankContent() {
       .catch((err) => console.error("Curriculum load error:", err));
   }, []);
 
-  // Filtered chapters & papers based on selected subject
+  // Filtered subjects based on active category
+  const filteredSubjects = subjects.filter((s) => !category || s.category === category);
   const currentSubject = subjects.find((s) => s.id === subjectId);
+
+  // Available papers
   const availablePapers = currentSubject?.papers || [];
-  const availableChapters = currentSubject?.chapters || [];
 
   const loadQuestions = useCallback(() => {
     setLoading(true);
@@ -127,6 +130,7 @@ function QuestionBankContent() {
     if (category) params.set("category", category);
     if (subjectId) params.set("subjectId", subjectId);
     if (paperId) params.set("paperId", paperId);
+    if (paperNumber) params.set("paperNumber", paperNumber);
     if (chapterId) params.set("chapterId", chapterId);
     if (boardId) params.set("boardId", boardId);
     if (year) params.set("year", year);
@@ -145,11 +149,33 @@ function QuestionBankContent() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [category, subjectId, paperId, chapterId, boardId, year, difficulty, type, searchQuery, page]);
+  }, [category, subjectId, paperId, paperNumber, chapterId, boardId, year, difficulty, type, searchQuery, page]);
 
   useEffect(() => {
     loadQuestions();
   }, [loadQuestions]);
+
+  // Sync URL query without full reload
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    if (subjectId) params.set("subjectId", subjectId);
+    if (paperId) params.set("paperId", paperId);
+    if (paperNumber) params.set("paperNumber", paperNumber);
+    if (chapterId) params.set("chapterId", chapterId);
+    if (boardId) params.set("boardId", boardId);
+    if (year) params.set("year", year);
+    if (difficulty) params.set("difficulty", difficulty);
+    if (type) params.set("type", type);
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    if (page > 1) params.set("page", String(page));
+
+    const newQuery = params.toString();
+    const newUrl = newQuery ? `/questions?${newQuery}` : "/questions";
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", newUrl);
+    }
+  }, [category, subjectId, paperId, paperNumber, chapterId, boardId, year, difficulty, type, searchQuery, page]);
 
   const toggleSolution = (id: string) => {
     setExpandedSolutions((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -177,12 +203,64 @@ function QuestionBankContent() {
     setCategory("");
     setSubjectId("");
     setPaperId("");
+    setPaperNumber("");
     setChapterId("");
     setBoardId("");
     setYear("");
     setDifficulty("");
     setType("");
     setSearchQuery("");
+    setPage(1);
+  };
+
+  const handleSelectCategory = (val: string) => {
+    setCategory(val);
+    if (val && currentSubject && currentSubject.category !== val) {
+      setSubjectId("");
+      setPaperId("");
+      setPaperNumber("");
+      setChapterId("");
+    }
+    setPage(1);
+  };
+
+  const handleSelectSubject = (val: string) => {
+    setSubjectId(val);
+    setPaperId("");
+    setPaperNumber("");
+    setChapterId("");
+    if (val) {
+      const foundSub = subjects.find((s) => s.id === val);
+      if (foundSub && !category) {
+        setCategory(foundSub.category);
+      }
+    }
+    setPage(1);
+  };
+
+  const handleSelectPaper = (val: string) => {
+    if (val === "1" || val === "2") {
+      setPaperNumber(val);
+      setPaperId("");
+    } else {
+      setPaperId(val);
+      setPaperNumber("");
+    }
+    setPage(1);
+  };
+
+  const handleSelectChapter = (val: string) => {
+    setChapterId(val);
+    if (val && !subjectId) {
+      // Find which subject contains this chapter and auto-select
+      for (const s of subjects) {
+        if (s.chapters?.some((c) => c.id === val)) {
+          setSubjectId(s.id);
+          if (!category) setCategory(s.category);
+          break;
+        }
+      }
+    }
     setPage(1);
   };
 
@@ -195,6 +273,59 @@ function QuestionBankContent() {
   ];
 
   const yearsList = [2024, 2023, 2022, 2021, 2020, 2019, 2018];
+
+  // Active filter tags for one-click removal
+  const activeFilters = [
+    category && {
+      key: "category",
+      label: `ক্যাটাগরি: ${categories.find((c) => c.value === category)?.label || category}`,
+      onRemove: () => { setCategory(""); setPage(1); },
+    },
+    subjectId && {
+      key: "subject",
+      label: `বিষয়: ${subjects.find((s) => s.id === subjectId)?.nameBn || subjectId}`,
+      onRemove: () => { setSubjectId(""); setPaperId(""); setPaperNumber(""); setChapterId(""); setPage(1); },
+    },
+    (paperId || paperNumber) && {
+      key: "paper",
+      label: `পত্র: ${paperNumber ? (paperNumber === "1" ? "১ম পত্র" : "২য় পত্র") : (availablePapers.find((p) => p.id === paperId)?.nameBn || "নির্বাচিত পত্র")}`,
+      onRemove: () => { setPaperId(""); setPaperNumber(""); setPage(1); },
+    },
+    chapterId && {
+      key: "chapter",
+      label: `অধ্যায়: ${
+        currentSubject?.chapters?.find((c) => c.id === chapterId)?.nameBn ||
+        subjects.flatMap((s) => s.chapters || []).find((c) => c.id === chapterId)?.nameBn ||
+        "নির্বাচিত অধ্যায়"
+      }`,
+      onRemove: () => { setChapterId(""); setPage(1); },
+    },
+    boardId && {
+      key: "board",
+      label: `বোর্ড: ${boards.find((b) => b.id === boardId)?.nameBn || boardId}`,
+      onRemove: () => { setBoardId(""); setPage(1); },
+    },
+    year && {
+      key: "year",
+      label: `সাল: ${formatNumber(year)}`,
+      onRemove: () => { setYear(""); setPage(1); },
+    },
+    type && {
+      key: "type",
+      label: `ধরণ: ${type === "MCQ" ? "বহুনির্বাচনি (MCQ)" : "সৃজনশীল (CQ)"}`,
+      onRemove: () => { setType(""); setPage(1); },
+    },
+    difficulty && {
+      key: "difficulty",
+      label: `কঠিনতা: ${difficulty === "EASY" ? "সহজ" : difficulty === "HARD" ? "কঠিন" : "মাঝারি"}`,
+      onRemove: () => { setDifficulty(""); setPage(1); },
+    },
+    searchQuery && {
+      key: "search",
+      label: `অনুসন্ধান: "${searchQuery}"`,
+      onRemove: () => { setSearchQuery(""); setPage(1); },
+    },
+  ].filter(Boolean) as { key: string; label: string; onRemove: () => void }[];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -241,7 +372,7 @@ function QuestionBankContent() {
           <button
             type="button"
             onClick={handleResetFilters}
-            className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shrink-0"
+            className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shrink-0 cursor-pointer"
             title="সব ফিল্টার রিসেট করুন"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -258,13 +389,7 @@ function QuestionBankContent() {
           {categories.map((c) => (
             <button
               key={c.value}
-              onClick={() => {
-                setCategory(c.value);
-                setSubjectId("");
-                setPaperId("");
-                setChapterId("");
-                setPage(1);
-              }}
+              onClick={() => handleSelectCategory(c.value)}
               className={`px-3.5 py-1.5 rounded-full font-medium transition shrink-0 cursor-pointer ${
                 category === c.value
                   ? "bg-emerald-600 text-white font-semibold shadow-2xs"
@@ -283,22 +408,15 @@ function QuestionBankContent() {
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">বিষয় (Subject)</label>
             <select
               value={subjectId}
-              onChange={(e) => {
-                setSubjectId(e.target.value);
-                setPaperId("");
-                setChapterId("");
-                setPage(1);
-              }}
+              onChange={(e) => handleSelectSubject(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
               <option value="">সকল বিষয়</option>
-              {subjects
-                .filter((s) => !category || s.category === category)
-                .map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nameBn}
-                  </option>
-                ))}
+              {filteredSubjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nameBn}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -306,20 +424,23 @@ function QuestionBankContent() {
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">পত্র (Paper)</label>
             <select
-              value={paperId}
-              disabled={availablePapers.length === 0}
-              onChange={(e) => {
-                setPaperId(e.target.value);
-                setPage(1);
-              }}
-              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600 disabled:opacity-50"
+              value={paperId || paperNumber}
+              onChange={(e) => handleSelectPaper(e.target.value)}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
               <option value="">সকল পত্র</option>
-              {availablePapers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nameBn}
-                </option>
-              ))}
+              {availablePapers.length > 0 ? (
+                availablePapers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nameBn}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="1">১ম পত্র (1st Paper)</option>
+                  <option value="2">২য় পত্র (2nd Paper)</option>
+                </>
+              )}
             </select>
           </div>
 
@@ -328,19 +449,27 @@ function QuestionBankContent() {
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">অধ্যায় (Chapter)</label>
             <select
               value={chapterId}
-              disabled={!subjectId}
-              onChange={(e) => {
-                setChapterId(e.target.value);
-                setPage(1);
-              }}
-              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600 disabled:opacity-50"
+              onChange={(e) => handleSelectChapter(e.target.value)}
+              className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
               <option value="">সকল অধ্যায়</option>
-              {availableChapters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  অধ্যায় {c.chapterNum}: {c.nameBn}
-                </option>
-              ))}
+              {subjectId ? (
+                (currentSubject?.chapters || []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    অধ্যায় {c.chapterNum}: {c.nameBn}
+                  </option>
+                ))
+              ) : (
+                filteredSubjects.map((s) => (
+                  <optgroup key={s.id} label={s.nameBn}>
+                    {(s.chapters || []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        অধ্যায় {c.chapterNum}: {c.nameBn}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))
+              )}
             </select>
           </div>
 
@@ -401,6 +530,36 @@ function QuestionBankContent() {
             </select>
           </div>
         </div>
+
+        {/* Active Filter Chips / Badges */}
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-xs">
+            <span className="text-slate-400 text-[11px] font-semibold">সক্রিয় ফিল্টার:</span>
+            {activeFilters.map((af) => (
+              <span
+                key={af.key}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium"
+              >
+                <span>{af.label}</span>
+                <button
+                  type="button"
+                  onClick={af.onRemove}
+                  className="hover:text-emerald-950 hover:bg-emerald-200/60 rounded-full w-3.5 h-3.5 flex items-center justify-center cursor-pointer text-[10px]"
+                  title="ফিল্টার সরান"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="text-slate-500 hover:text-rose-600 text-[11px] font-semibold underline ml-1 cursor-pointer"
+            >
+              সব সাফ করুন
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Results Header */}
@@ -424,18 +583,41 @@ function QuestionBankContent() {
           <p className="text-sm font-medium">প্রশ্নমালা লোড হচ্ছে...</p>
         </div>
       ) : questions.length === 0 ? (
-        <div className="bg-white p-16 rounded-2xl border border-slate-200 text-center space-y-3">
+        <div className="bg-white p-12 sm:p-16 rounded-2xl border border-slate-200 text-center space-y-4">
           <BookOpen className="w-12 h-12 text-slate-300 mx-auto" />
-          <p className="text-slate-800 font-bold text-lg">কোনো প্রশ্ন পাওয়া যায়নি</p>
-          <p className="text-sm text-slate-500 max-w-sm mx-auto">
-            আপনার নির্বাচিত ফিল্টার বা অনুসন্ধানের সাথে মিল রেখে কোনো প্রশ্ন পাওয়া যায়নি। অন্য ফিল্টার দিয়ে চেষ্টা করুন।
-          </p>
-          <button
-            onClick={handleResetFilters}
-            className="mt-2 px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 transition"
-          >
-            সব ফিল্টার সাফ করুন
-          </button>
+          <div className="space-y-1">
+            <p className="text-slate-800 font-bold text-lg">কোনো প্রশ্ন পাওয়া যায়নি</p>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              আপনার নির্বাচিত ফিল্টার বা অনুসন্ধানের সাথে হুবহু মিল রেখে কোনো প্রশ্ন পাওয়া যায়নি। ফিল্টারের পরিধি বৃদ্ধি করে পুনরায় চেষ্টা করুন।
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+            {boardId && (
+              <button
+                type="button"
+                onClick={() => { setBoardId(""); setPage(1); }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                বোর্ড ফিল্টার সাফ করুন
+              </button>
+            )}
+            {year && (
+              <button
+                type="button"
+                onClick={() => { setYear(""); setPage(1); }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                সাল ফিল্টার সাফ করুন
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 transition cursor-pointer"
+            >
+              সব ফিল্টার সাফ করুন
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
