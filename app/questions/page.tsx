@@ -106,17 +106,16 @@ function QuestionBankContent() {
   const [type, setType] = useState(searchParams.get("type") || "");
   const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
 
-  // Check if any filter option is currently active
+  // Check if any specific filter option is currently active
+  // Note: Category alone (e.g. HSC/SSC) sets academic level, but a specific filter
+  // (Subject, Chapter, Board, Year, or Search Query) must be selected before questions are displayed.
   const hasActiveFilter = Boolean(
-    category ||
     subjectId ||
     paperId ||
     paperNumber ||
     chapterId ||
     boardId ||
     year ||
-    difficulty ||
-    type ||
     searchQuery.trim()
   );
 
@@ -579,42 +578,110 @@ function QuestionBankContent() {
 
       {/* Question Results or Initial Filter Prompt */}
       {!hasActiveFilter ? (
-        <div className="bg-white p-8 sm:p-14 rounded-2xl border border-slate-200 text-center space-y-6 shadow-xs">
-          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-100 shadow-2xs">
-            <Filter className="w-8 h-8 text-emerald-600" />
-          </div>
-          <div className="max-w-lg mx-auto space-y-2">
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              প্রশ্ন দেখতে ক্যাটাগরি বা ফিল্টার নির্বাচন করুন
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
-              উপরে আপনার কাঙ্ক্ষিত পরীক্ষা (SSC, HSC, মেডিকেল ভর্তি, বিশ্ববিদ্যালয় ভর্তি) অথবা বিষয়, অধ্যায় বা বোর্ড নির্বাচন করলেই ফিল্টারকৃত প্রশ্নসমূহ দেখতে পাবেন।
-            </p>
-          </div>
+        <div className="bg-white p-6 sm:p-10 rounded-2xl border border-slate-200 text-center space-y-6 shadow-xs">
+          {category ? (
+            <>
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-100 shadow-2xs">
+                <BookOpen className="w-7 h-7 text-emerald-600" />
+              </div>
+              <div className="max-w-lg mx-auto space-y-1.5">
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                  {categories.find((c) => c.value === category)?.label || category} এর বিষয় নির্বাচন করুন
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+                  প্রশ্নমালা দেখতে নিচের যেকোনো একটি বিষয় নির্বাচন করুন অথবা বোর্ড ও সালের ফিল্টার ব্যবহার করুন।
+                </p>
+              </div>
 
-          {/* Quick-Pick Category Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 max-w-2xl mx-auto pt-2">
-            {categories
-              .filter((c) => c.value !== "")
-              .map((cat) => (
-                <button
-                  key={cat.value}
-                  type="button"
-                  onClick={() => handleSelectCategory(cat.value)}
-                  className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-emerald-50/70 hover:border-emerald-300 transition text-center space-y-2 cursor-pointer group shadow-2xs"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 group-hover:border-emerald-400 flex items-center justify-center mx-auto text-emerald-600 font-bold shadow-2xs">
-                    <GraduationCap className="w-5 h-5 text-emerald-600" />
-                  </div>
-                  <p className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-emerald-800">
-                    {cat.label}
+              {/* Subject Cards for Selected Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-4xl mx-auto pt-2 text-left">
+                {filteredSubjects.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSelectSubject(s.id)}
+                    className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-emerald-50/70 hover:border-emerald-300 transition space-y-2 cursor-pointer group shadow-2xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 group-hover:border-emerald-400 group-hover:bg-emerald-600 group-hover:text-white flex items-center justify-center text-emerald-600 font-bold shadow-2xs transition">
+                        <BookOpen className="w-4 h-4" />
+                      </div>
+                      <span className="text-[11px] text-emerald-700 font-semibold group-hover:underline flex items-center gap-1">
+                        প্রশ্ন দেখুন →
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-800 group-hover:text-emerald-900">
+                        {s.nameBn}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {s.chapters?.length ? `${s.chapters.length} টি অধ্যায়` : "অধ্যায়সমূহ"}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Fast Board Pills */}
+              {boards.length > 0 && (
+                <div className="pt-4 border-t border-slate-100 max-w-4xl mx-auto space-y-2.5">
+                  <p className="text-xs font-semibold text-slate-500">
+                    অথবা শিক্ষা বোর্ড অনুযায়ী বিগত বছরের প্রশ্ন দেখুন:
                   </p>
-                  <span className="inline-block text-[11px] text-emerald-700 font-medium group-hover:underline">
-                    প্রশ্ন দেখুন →
-                  </span>
-                </button>
-              ))}
-          </div>
+                  <div className="flex flex-wrap items-center justify-center gap-1.5">
+                    {boards.map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => { setBoardId(b.id); setPage(1); }}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 text-xs font-medium transition cursor-pointer"
+                      >
+                        {b.nameBn}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-100 shadow-2xs">
+                <Filter className="w-7 h-7 text-emerald-600" />
+              </div>
+              <div className="max-w-lg mx-auto space-y-1.5">
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                  প্রশ্ন দেখতে ক্যাটাগরি বা ফিল্টার নির্বাচন করুন
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+                  উপরে আপনার কাঙ্ক্ষিত পরীক্ষা (SSC, HSC, মেডিকেল ভর্তি, বিশ্ববিদ্যালয় ভর্তি) অথবা বিষয়, অধ্যায় বা বোর্ড নির্বাচন করলেই ফিল্টারকৃত প্রশ্নসমূহ দেখতে পাবেন।
+                </p>
+              </div>
+
+              {/* Quick-Pick Category Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 max-w-2xl mx-auto pt-2">
+                {categories
+                  .filter((c) => c.value !== "")
+                  .map((cat) => (
+                    <button
+                      key={cat.value}
+                      type="button"
+                      onClick={() => handleSelectCategory(cat.value)}
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-emerald-50/70 hover:border-emerald-300 transition text-center space-y-2 cursor-pointer group shadow-2xs"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 group-hover:border-emerald-400 flex items-center justify-center mx-auto text-emerald-600 font-bold shadow-2xs">
+                        <GraduationCap className="w-5 h-5 text-emerald-600" />
+                      </div>
+                      <p className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-emerald-800">
+                        {cat.label}
+                      </p>
+                      <span className="inline-block text-[11px] text-emerald-700 font-medium group-hover:underline">
+                        বিষয়সমূহ দেখুন →
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <>
