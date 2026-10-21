@@ -112,10 +112,10 @@ pm2 save
 
 echo "=========================================================="
 echo " INSTALLATION SUCCESSFUL!"
-echo " App running on http://127.0.0.1:3005"
+echo " App running on http://127.0.0.1:3006"
 echo " Next steps in aaPanel:"
 echo " 1. Go to Website -> ${DOMAIN} -> Reverse Proxy"
-echo " 2. Set Target URL to: http://127.0.0.1:3005"
+echo " 2. Set Target URL to: http://127.0.0.1:3006"
 echo " 3. Apply SSL certificate (Let's Encrypt)"
 echo " 4. Admin Login: https://${DOMAIN}/admin/login"
 echo "    Email: admin@eliteali.com"
