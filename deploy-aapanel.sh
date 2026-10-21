@@ -48,14 +48,29 @@ mkdir -p /www/wwwroot
 TARGET_DIR="/www/wwwroot/app.eliteali.com"
 
 if [ -d "$TARGET_DIR/.git" ]; then
-    echo "Directory exists. Pulling latest code..."
+    echo "Directory exists with git. Pulling latest code..."
     cd "$TARGET_DIR"
     git fetch origin main
     git reset --hard origin/main
 else
-    echo "Cloning repository from GitHub..."
-    rm -rf "$TARGET_DIR"
-    git clone https://github.com/edge-tec/students-managemant.git "$TARGET_DIR"
+    echo "Preparing directory and cloning repository from GitHub..."
+    if [ -f "$TARGET_DIR/.user.ini" ]; then
+        chattr -i "$TARGET_DIR/.user.ini" 2>/dev/null || true
+        rm -f "$TARGET_DIR/.user.ini" 2>/dev/null || true
+    fi
+    mkdir -p "$TARGET_DIR"
+    if [ -d "$TARGET_DIR" ]; then
+        # If directory has other files from aaPanel, remove immutable flags and clear
+        chattr -R -i "$TARGET_DIR" 2>/dev/null || true
+        rm -rf "$TARGET_DIR" 2>/dev/null || true
+    fi
+    git clone https://github.com/edge-tec/students-managemant.git "$TARGET_DIR" || (
+        # If directory still exists and non-empty, clone into temp and move
+        TMP_CLONE="/tmp/students-mgmt-$$"
+        git clone https://github.com/edge-tec/students-managemant.git "$TMP_CLONE"
+        cp -a "$TMP_CLONE/." "$TARGET_DIR/"
+        rm -rf "$TMP_CLONE"
+    )
     cd "$TARGET_DIR"
 fi
 
