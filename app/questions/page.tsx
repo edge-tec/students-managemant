@@ -239,8 +239,9 @@ function QuestionBankContent() {
   };
 
   const handleSelectCategory = (val: string) => {
-    setCategory(val);
-    if (val && currentSubject && currentSubject.category !== val) {
+    const nextVal = category === val ? "" : val;
+    setCategory(nextVal);
+    if (nextVal && currentSubject && currentSubject.category !== nextVal) {
       setSubjectId("");
       setPaperId("");
       setPaperNumber("");
@@ -290,7 +291,6 @@ function QuestionBankContent() {
   };
 
   const categories = [
-    { label: t.common.all, value: "" },
     { label: "SSC (নবম-দশম)", value: "SSC" },
     { label: "HSC (একাদশ-দ্বাদশ)", value: "HSC" },
     { label: "মেডিকেল ভর্তি", value: "MEDICAL" },
@@ -436,7 +436,7 @@ function QuestionBankContent() {
               onChange={(e) => handleSelectSubject(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
-              <option value="">সকল বিষয়</option>
+              <option value="">বিষয় নির্বাচন করুন</option>
               {filteredSubjects.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nameBn}
@@ -453,7 +453,7 @@ function QuestionBankContent() {
               onChange={(e) => handleSelectPaper(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
-              <option value="">সকল পত্র</option>
+              <option value="">পত্র নির্বাচন করুন</option>
               {availablePapers.length > 0 ? (
                 availablePapers.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -477,7 +477,7 @@ function QuestionBankContent() {
               onChange={(e) => handleSelectChapter(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
-              <option value="">সকল অধ্যায়</option>
+              <option value="">অধ্যায় নির্বাচন করুন</option>
               {subjectId ? (
                 (currentSubject?.chapters || []).map((c) => (
                   <option key={c.id} value={c.id}>
@@ -509,7 +509,7 @@ function QuestionBankContent() {
               }}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
-              <option value="">সকল বোর্ড</option>
+              <option value="">শিক্ষা বোর্ড নির্বাচন করুন</option>
               {boards.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.nameBn}
@@ -529,7 +529,7 @@ function QuestionBankContent() {
               }}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
-              <option value="">সকল সাল</option>
+              <option value="">পরীক্ষার সাল নির্বাচন করুন</option>
               {yearsList.map((y) => (
                 <option key={y} value={y}>
                   {formatNumber(y)} সাল
@@ -549,7 +549,7 @@ function QuestionBankContent() {
               }}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
-              <option value="">সকল ধরণের প্রশ্ন</option>
+              <option value="">ধরণ নির্বাচন করুন</option>
               <option value="MCQ">বহুনির্বাচনি (MCQ)</option>
               <option value="CQ">সৃজনশীল (CQ)</option>
             </select>
