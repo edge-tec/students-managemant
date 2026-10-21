@@ -17,6 +17,11 @@ import {
   Clock,
   User,
   MessageSquare,
+  Pencil,
+  Trash2,
+  Edit2,
+  Layers,
+  FolderPlus,
 } from "lucide-react";
 import { MathText } from "@/components/ui/MathText";
 
@@ -192,16 +197,40 @@ export function QuestionManager() {
   const [search, setSearch] = useState("");
 
   // Curriculum dropdown data
+  const [classes, setClasses] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
   const [boards, setBoards] = useState<any[]>([]);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState<QuestionAdminItem | null>(null);
   const [previewQuestion, setPreviewQuestion] = useState<QuestionAdminItem | null>(null);
   const [auditQuestion, setAuditQuestion] = useState<QuestionAdminItem | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Create Form State
+  // Quick Inline Add / Edit states for Curriculum
+  const [showQuickAddClass, setShowQuickAddClass] = useState(false);
+  const [quickClassCode, setQuickClassCode] = useState("");
+  const [quickClassNameBn, setQuickClassNameBn] = useState("");
+  const [quickClassNameEn, setQuickClassNameEn] = useState("");
+  const [quickClassOrder, setQuickClassOrder] = useState<number>(1);
+
+  const [showQuickAddSubject, setShowQuickAddSubject] = useState(false);
+  const [showQuickEditSubject, setShowQuickEditSubject] = useState(false);
+  const [quickSubjectCode, setQuickSubjectCode] = useState("");
+  const [quickSubjectNameBn, setQuickSubjectNameBn] = useState("");
+  const [quickSubjectNameEn, setQuickSubjectNameEn] = useState("");
+  const [quickSubjectCategory, setQuickSubjectCategory] = useState("HSC");
+  const [quickSubjectClassId, setQuickSubjectClassId] = useState("");
+
+  const [showQuickAddChapter, setShowQuickAddChapter] = useState(false);
+  const [showQuickEditChapter, setShowQuickEditChapter] = useState(false);
+  const [quickChapterNum, setQuickChapterNum] = useState<number>(1);
+  const [quickChapterNameBn, setQuickChapterNameBn] = useState("");
+  const [quickChapterNameEn, setQuickChapterNameEn] = useState("");
+  const [quickLoading, setQuickLoading] = useState(false);
+
+  // Create / Edit Form State
   const [createType, setCreateType] = useState<"MCQ" | "CQ">("MCQ");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [selectedChapterId, setSelectedChapterId] = useState("");
@@ -238,20 +267,35 @@ export function QuestionManager() {
   const [submitting, setSubmitting] = useState(false);
 
   // Fetch Curriculum Metadata
-  useEffect(() => {
-    fetch("/api/v1/curriculum")
-      .then((res) => res.json())
-      .then((data) => {
-        setSubjects(data.subjects || []);
-        setBoards(data.boards || []);
-        if (data.subjects?.length > 0) {
-          setSelectedSubjectId(data.subjects[0].id);
-          if (data.subjects[0].chapters?.length > 0) {
-            setSelectedChapterId(data.subjects[0].chapters[0].id);
-          }
+  const fetchCurriculumMetadata = useCallback(async (selectSubId?: string, selectChapId?: string) => {
+    try {
+      const res = await fetch("/api/v1/curriculum");
+      const data = await res.json();
+      setClasses(data.classes || []);
+      setSubjects(data.subjects || []);
+      setBoards(data.boards || []);
+      if (selectSubId) {
+        setSelectedSubjectId(selectSubId);
+        const sub = (data.subjects || []).find((s: any) => s.id === selectSubId);
+        if (selectChapId) {
+          setSelectedChapterId(selectChapId);
+        } else if (sub?.chapters?.length > 0) {
+          setSelectedChapterId(sub.chapters[0].id);
         }
-      });
+      } else if (data.subjects?.length > 0) {
+        setSelectedSubjectId((prev) => prev || data.subjects[0].id);
+        if (data.subjects[0].chapters?.length > 0) {
+          setSelectedChapterId((prev) => prev || data.subjects[0].chapters[0].id);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch curriculum metadata:", err);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchCurriculumMetadata();
+  }, [fetchCurriculumMetadata]);
 
   const loadQuestions = useCallback(async () => {
     setLoading(true);
@@ -374,6 +418,298 @@ export function QuestionManager() {
     }
   };
 
+  // Quick Actions: Create Class
+  const handleQuickCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickClassCode.trim() || !quickClassNameBn.trim()) {
+      setAlertMsg({ type: "error", text: "শ্রেণির কোড ও বাংলা নাম আবশ্যক।" });
+      return;
+    }
+    setQuickLoading(true);
+    try {
+      const res = await fetch("/api/v1/admin/curriculum", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity: "class",
+          code: quickClassCode.trim().toUpperCase(),
+          nameBn: quickClassNameBn.trim(),
+          nameEn: quickClassNameEn.trim() || quickClassNameBn.trim(),
+          orderIndex: Number(quickClassOrder) || 0,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertMsg({ type: "error", text: data.error || "শ্রেণি তৈরি ব্যর্থ হয়েছে।" });
+      } else {
+        setAlertMsg({ type: "success", text: "নতুন শ্রেণি সফলভাবে তৈরি হয়েছে।" });
+        setShowQuickAddClass(false);
+        setQuickClassCode("");
+        setQuickClassNameBn("");
+        setQuickClassNameEn("");
+        await fetchCurriculumMetadata();
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: "error", text: err.message });
+    } finally {
+      setQuickLoading(false);
+    }
+  };
+
+  // Quick Actions: Create Subject
+  const handleQuickCreateSubject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSubjectCode.trim() || !quickSubjectNameBn.trim()) {
+      setAlertMsg({ type: "error", text: "বিষয়ের কোড ও বাংলা নাম আবশ্যক।" });
+      return;
+    }
+    setQuickLoading(true);
+    try {
+      const res = await fetch("/api/v1/admin/curriculum", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity: "subject",
+          code: quickSubjectCode.trim().toUpperCase(),
+          nameBn: quickSubjectNameBn.trim(),
+          nameEn: quickSubjectNameEn.trim() || quickSubjectNameBn.trim(),
+          category: quickSubjectCategory || createCategory || "HSC",
+          classId: quickSubjectClassId || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertMsg({ type: "error", text: data.error || "বিষয় তৈরি ব্যর্থ হয়েছে।" });
+      } else {
+        setAlertMsg({ type: "success", text: "নতুন বিষয় সফলভাবে তৈরি হয়েছে।" });
+        setShowQuickAddSubject(false);
+        setQuickSubjectCode("");
+        setQuickSubjectNameBn("");
+        setQuickSubjectNameEn("");
+        const newSubId = data.item?.id;
+        await fetchCurriculumMetadata(newSubId);
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: "error", text: err.message });
+    } finally {
+      setQuickLoading(false);
+    }
+  };
+
+  // Quick Actions: Edit Selected Subject
+  const handleQuickEditSubject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSubjectId || !quickSubjectNameBn.trim()) return;
+    setQuickLoading(true);
+    try {
+      const res = await fetch("/api/v1/admin/curriculum", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity: "subject",
+          id: selectedSubjectId,
+          code: quickSubjectCode.trim().toUpperCase(),
+          nameBn: quickSubjectNameBn.trim(),
+          nameEn: quickSubjectNameEn.trim() || quickSubjectNameBn.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertMsg({ type: "error", text: data.error || "বিষয় আপডেট ব্যর্থ হয়েছে।" });
+      } else {
+        setAlertMsg({ type: "success", text: "বিষয় সফলভাবে আপডেট হয়েছে।" });
+        setShowQuickEditSubject(false);
+        await fetchCurriculumMetadata(selectedSubjectId, selectedChapterId);
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: "error", text: err.message });
+    } finally {
+      setQuickLoading(false);
+    }
+  };
+
+  // Quick Actions: Create Chapter
+  const handleQuickCreateChapter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSubjectId || !quickChapterNameBn.trim()) {
+      setAlertMsg({ type: "error", text: "অধ্যায়ের নাম আবশ্যক।" });
+      return;
+    }
+    setQuickLoading(true);
+    try {
+      const res = await fetch("/api/v1/admin/curriculum", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity: "chapter",
+          subjectId: selectedSubjectId,
+          chapterNum: Number(quickChapterNum) || 1,
+          nameBn: quickChapterNameBn.trim(),
+          nameEn: quickChapterNameEn.trim() || quickChapterNameBn.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertMsg({ type: "error", text: data.error || "অধ্যায় তৈরি ব্যর্থ হয়েছে।" });
+      } else {
+        setAlertMsg({ type: "success", text: "নতুন অধ্যায় সফলভাবে তৈরি হয়েছে।" });
+        setShowQuickAddChapter(false);
+        setQuickChapterNameBn("");
+        setQuickChapterNameEn("");
+        const newChapId = data.item?.id;
+        await fetchCurriculumMetadata(selectedSubjectId, newChapId);
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: "error", text: err.message });
+    } finally {
+      setQuickLoading(false);
+    }
+  };
+
+  // Quick Actions: Edit Selected Chapter
+  const handleQuickEditChapter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedChapterId || !quickChapterNameBn.trim()) return;
+    setQuickLoading(true);
+    try {
+      const res = await fetch("/api/v1/admin/curriculum", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity: "chapter",
+          id: selectedChapterId,
+          chapterNum: Number(quickChapterNum) || 1,
+          nameBn: quickChapterNameBn.trim(),
+          nameEn: quickChapterNameEn.trim() || quickChapterNameBn.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertMsg({ type: "error", text: data.error || "অধ্যায় আপডেট ব্যর্থ হয়েছে।" });
+      } else {
+        setAlertMsg({ type: "success", text: "অধ্যায় সফলভাবে আপডেট হয়েছে।" });
+        setShowQuickEditChapter(false);
+        await fetchCurriculumMetadata(selectedSubjectId, selectedChapterId);
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: "error", text: err.message });
+    } finally {
+      setQuickLoading(false);
+    }
+  };
+
+  // Option Handlers: Add and Remove Options
+  const handleAddOption = () => {
+    const keys = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    const nextKey = keys[options.length] || `OPT_${options.length + 1}`;
+    setOptions((prev) => [
+      ...prev,
+      { optionKey: nextKey, textBn: "", textEn: "", isCorrect: false },
+    ]);
+  };
+
+  const handleRemoveOption = (keyToRemove: string) => {
+    if (options.length <= 2) {
+      setAlertMsg({ type: "error", text: "কমপক্ষে ২টি অপশন থাকতে হবে।" });
+      return;
+    }
+    setOptions((prev) => {
+      const filtered = prev.filter((o) => o.optionKey !== keyToRemove);
+      const hasCorrect = filtered.some((o) => o.isCorrect);
+      if (!hasCorrect && filtered.length > 0) {
+        filtered[0].isCorrect = true;
+      }
+      return filtered;
+    });
+  };
+
+  // Open Create Question Modal
+  const handleOpenCreateQuestion = () => {
+    setEditingQuestion(null);
+    setQuestionTextBn("");
+    setQuestionTextEn("");
+    setStemBn("");
+    setStemEn("");
+    setTextbookRef("");
+    setTeacherTipsBn("");
+    setExplanationBn("");
+    setOptions([
+      { optionKey: "A", textBn: "", textEn: "", isCorrect: true },
+      { optionKey: "B", textBn: "", textEn: "", isCorrect: false },
+      { optionKey: "C", textBn: "", textEn: "", isCorrect: false },
+      { optionKey: "D", textBn: "", textEn: "", isCorrect: false },
+    ]);
+    setShowCreateModal(true);
+  };
+
+  // Open Edit Question Modal
+  const handleOpenEditQuestion = (q: QuestionAdminItem) => {
+    setEditingQuestion(q);
+    setCreateType(q.type === "CQ" ? "CQ" : "MCQ");
+    setCreateCategory(q.category);
+    const matchedSub = subjects.find(
+      (s) => s.id === (q as any).subjectId || s.code === q.subject?.code
+    );
+    if (matchedSub) {
+      setSelectedSubjectId(matchedSub.id);
+      const matchedChap = matchedSub.chapters?.find(
+        (c: any) => c.id === (q as any).chapterId || c.chapterNum === q.chapter?.chapterNum
+      );
+      if (matchedChap) {
+        setSelectedChapterId(matchedChap.id);
+      } else if (matchedSub.chapters?.length > 0) {
+        setSelectedChapterId(matchedSub.chapters[0].id);
+      }
+    }
+    setCreateDifficulty(q.difficulty);
+    setCreateStatus(q.status);
+    setCreateIsPremium(q.isPremium);
+    setQuestionTextBn(q.questionTextBn || "");
+    setQuestionTextEn(q.questionTextEn || "");
+    setStemBn(q.stemBn || "");
+    setTextbookRef(q.textbookRef || "");
+    setTeacherTipsBn((q as any).teacherTipsBn || "");
+    setExplanationBn(q.answer?.explanationBn || "");
+
+    if (q.references && q.references.length > 0) {
+      setExamYear(q.references[0].examYear || 2023);
+      setBoardId((q.references[0] as any).boardId || "");
+    }
+
+    if (q.options && q.options.length > 0) {
+      setOptions(
+        q.options.map((opt) => ({
+          optionKey: opt.optionKey,
+          textBn: opt.textBn,
+          textEn: (opt as any).textEn || "",
+          isCorrect: q.answer?.correctKey === opt.optionKey || opt.isCorrect,
+        }))
+      );
+    } else {
+      setOptions([
+        { optionKey: "A", textBn: "", textEn: "", isCorrect: true },
+        { optionKey: "B", textBn: "", textEn: "", isCorrect: false },
+        { optionKey: "C", textBn: "", textEn: "", isCorrect: false },
+        { optionKey: "D", textBn: "", textEn: "", isCorrect: false },
+      ]);
+    }
+
+    if (q.subparts && q.subparts.length > 0) {
+      setSubparts(
+        q.subparts.map((sp) => ({
+          partLabel: sp.partLabel,
+          questionTextBn: sp.questionTextBn,
+          questionTextEn: (sp as any).questionTextEn || "",
+          marks: sp.marks,
+          solutionBn: sp.solutionBn,
+          markingGuidance: (sp as any).markingGuidance || "",
+        }))
+      );
+    }
+
+    setShowCreateModal(true);
+  };
+
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -426,17 +762,31 @@ export function QuestionManager() {
     }
 
     try {
-      const res = await fetch("/api/v1/admin/questions", {
-        method: "POST",
+      const url = editingQuestion
+        ? `/api/v1/admin/questions/${editingQuestion.id}`
+        : "/api/v1/admin/questions";
+      const method = editingQuestion ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
-        setAlertMsg({ type: "error", text: data.error || "প্রশ্ন তৈরি ব্যর্থ হয়েছে।" });
+        setAlertMsg({
+          type: "error",
+          text: data.error || (editingQuestion ? "প্রশ্ন আপডেট ব্যর্থ হয়েছে।" : "প্রশ্ন তৈরি ব্যর্থ হয়েছে।"),
+        });
       } else {
-        setAlertMsg({ type: "success", text: "নতুন প্রশ্ন সফলভাবে তৈরি হয়েছে।" });
+        setAlertMsg({
+          type: "success",
+          text: editingQuestion
+            ? "প্রশ্ন ও অপশনসমূহ সফলভাবে আপডেট করা হয়েছে।"
+            : "নতুন প্রশ্ন সফলভাবে তৈরি হয়েছে।",
+        });
         setShowCreateModal(false);
+        setEditingQuestion(null);
         setQuestionTextBn("");
         setQuestionTextEn("");
         setStemBn("");
@@ -467,7 +817,7 @@ export function QuestionManager() {
         </div>
 
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={handleOpenCreateQuestion}
           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition shadow-xs"
         >
           <Plus className="w-4 h-4" />
@@ -695,6 +1045,14 @@ export function QuestionManager() {
                       title="প্রিভিউ"
                     >
                       <Eye className="w-4 h-4 inline" />
+                    </button>
+
+                    <button
+                      onClick={() => handleOpenEditQuestion(q)}
+                      className="p-1 rounded text-slate-500 hover:text-emerald-700 hover:bg-slate-100 transition"
+                      title="প্রশ্ন ও অপশনসমূহ সম্পাদনা করুন"
+                    >
+                      <Pencil className="w-4 h-4 inline" />
                     </button>
 
                     {/* Review Actions */}
@@ -1017,10 +1375,16 @@ export function QuestionManager() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-base">নতুন প্রশ্ন তৈরি করুন</h3>
+              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <FileQuestion className="w-4 h-4 text-emerald-600" />
+                <span>{editingQuestion ? "প্রশ্ন ও অপশনসমূহ সম্পাদনা করুন" : "নতুন প্রশ্ন তৈরি করুন"}</span>
+              </h3>
               <button
                 type="button"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setEditingQuestion(null);
+                }}
                 className="text-slate-400 hover:text-slate-600 text-xl font-bold"
               >
                 &times;
@@ -1051,24 +1415,78 @@ export function QuestionManager() {
                 </label>
               </div>
 
-              {/* Category, Subject, Chapter, Board, Year */}
+              {/* Category, Subject, Chapter Row */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Category / Class */}
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">ক্যাটাগরি</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700">ক্যাটাগরি / শ্রেণি</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickAddClass(!showQuickAddClass)}
+                      className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-0.5"
+                      title="নতুন অ্যাকাডেমিক শ্রেণি যোগ করুন"
+                    >
+                      <Plus className="w-3 h-3" /> শ্রেণি যোগ
+                    </button>
+                  </div>
                   <select
                     value={createCategory}
                     onChange={(e) => setCreateCategory(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white"
+                    className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white font-medium"
                   >
-                    <option value="SSC">SSC (৯ম-১০ম)</option>
                     <option value="HSC">HSC (১১শ-১২শ)</option>
+                    <option value="SSC">SSC (৯ম-১০ম)</option>
                     <option value="MEDICAL">Medical Admission</option>
                     <option value="UNIVERSITY">University Admission</option>
+                    {classes.map((cls) => (
+                      <option key={cls.id} value={cls.code}>
+                        {cls.nameBn} ({cls.code})
+                      </option>
+                    ))}
                   </select>
                 </div>
 
+                {/* 2. Subject */}
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">বিষয়</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700">বিষয়</label>
+                    <div className="flex items-center gap-1.5">
+                      {selectedSubjectId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const sub = subjects.find((s) => s.id === selectedSubjectId);
+                            if (sub) {
+                              setQuickSubjectCode(sub.code);
+                              setQuickSubjectNameBn(sub.nameBn);
+                              setQuickSubjectNameEn(sub.nameEn || "");
+                            }
+                            setShowQuickEditSubject(!showQuickEditSubject);
+                            setShowQuickAddSubject(false);
+                          }}
+                          className="text-[11px] text-slate-600 hover:text-emerald-700 font-semibold flex items-center gap-0.5"
+                          title="নির্বাচিত বিষয় সম্পাদনা করুন"
+                        >
+                          <Pencil className="w-2.5 h-2.5" /> এডিট
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQuickSubjectCode("");
+                          setQuickSubjectNameBn("");
+                          setQuickSubjectNameEn("");
+                          setShowQuickAddSubject(!showQuickAddSubject);
+                          setShowQuickEditSubject(false);
+                        }}
+                        className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-0.5"
+                        title="নতুন বিষয় যোগ করুন"
+                      >
+                        <Plus className="w-3 h-3" /> বিষয় যোগ
+                      </button>
+                    </div>
+                  </div>
                   <select
                     value={selectedSubjectId}
                     onChange={(e) => {
@@ -1076,7 +1494,7 @@ export function QuestionManager() {
                       const sub = subjects.find((s) => s.id === e.target.value);
                       if (sub?.chapters?.length > 0) setSelectedChapterId(sub.chapters[0].id);
                     }}
-                    className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white"
+                    className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white font-medium"
                   >
                     {subjects.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -1086,20 +1504,279 @@ export function QuestionManager() {
                   </select>
                 </div>
 
+                {/* 3. Chapter */}
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">অধ্যায়</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700">অধ্যায়</label>
+                    <div className="flex items-center gap-1.5">
+                      {selectedChapterId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const chap = currentChapters.find((c: any) => c.id === selectedChapterId);
+                            if (chap) {
+                              setQuickChapterNum(chap.chapterNum);
+                              setQuickChapterNameBn(chap.nameBn);
+                              setQuickChapterNameEn(chap.nameEn || "");
+                            }
+                            setShowQuickEditChapter(!showQuickEditChapter);
+                            setShowQuickAddChapter(false);
+                          }}
+                          className="text-[11px] text-slate-600 hover:text-emerald-700 font-semibold flex items-center gap-0.5"
+                          title="নির্বাচিত অধ্যায় সম্পাদনা করুন"
+                        >
+                          <Pencil className="w-2.5 h-2.5" /> এডিট
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextNum = (currentChapters?.length || 0) + 1;
+                          setQuickChapterNum(nextNum);
+                          setQuickChapterNameBn("");
+                          setQuickChapterNameEn("");
+                          setShowQuickAddChapter(!showQuickAddChapter);
+                          setShowQuickEditChapter(false);
+                        }}
+                        className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-0.5"
+                        title="নতুন অধ্যায় যোগ করুন"
+                      >
+                        <Plus className="w-3 h-3" /> অধ্যায় যোগ
+                      </button>
+                    </div>
+                  </div>
                   <select
                     value={selectedChapterId}
                     onChange={(e) => setSelectedChapterId(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white"
+                    className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white font-medium"
                   >
-                    {currentChapters.map((c: any) => (
-                      <option key={c.id} value={c.id}>
-                        অধ্যায় {c.chapterNum}: {c.nameBn}
-                      </option>
-                    ))}
+                    {currentChapters.length === 0 ? (
+                      <option value="">কোনো অধ্যায় নেই (নতুন যোগ করুন)</option>
+                    ) : (
+                      currentChapters.map((c: any) => (
+                        <option key={c.id} value={c.id}>
+                          অধ্যায় {c.chapterNum}: {c.nameBn}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
+
+                {/* Inline Quick Add Class Drawer */}
+                {showQuickAddClass && (
+                  <div className="col-span-full p-3 bg-emerald-50/80 border border-emerald-300 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between font-bold text-emerald-900 text-xs">
+                      <span>নতুন অ্যাকাডেমিক শ্রেণি / ক্যাটাগরি তৈরি করুন</span>
+                      <button type="button" onClick={() => setShowQuickAddClass(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <input
+                        type="text"
+                        placeholder="কোড (যেমন: CLASS_8, ALIM)"
+                        value={quickClassCode}
+                        onChange={(e) => setQuickClassCode(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white font-mono uppercase"
+                      />
+                      <input
+                        type="text"
+                        placeholder="নাম বাংলায় (যেমন: ৮ম শ্রেণি)"
+                        value={quickClassNameBn}
+                        onChange={(e) => setQuickClassNameBn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white"
+                      />
+                      <input
+                        type="text"
+                        placeholder="নাম ইংরেজিতে (যেমন: Class 8)"
+                        value={quickClassNameEn}
+                        onChange={(e) => setQuickClassNameEn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white"
+                      />
+                      <div className="flex gap-1.5">
+                        <input
+                          type="number"
+                          placeholder="ক্রমিক"
+                          value={quickClassOrder}
+                          onChange={(e) => setQuickClassOrder(Number(e.target.value))}
+                          className="w-16 p-1.5 border border-slate-300 rounded bg-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={quickLoading}
+                          onClick={handleQuickCreateClass}
+                          className="flex-1 bg-emerald-600 text-white rounded font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {quickLoading ? "..." : "সংরক্ষণ"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Quick Add Subject Drawer */}
+                {showQuickAddSubject && (
+                  <div className="col-span-full p-3 bg-blue-50/80 border border-blue-300 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between font-bold text-blue-900 text-xs">
+                      <span>নতুন বিষয় যোগ করুন</span>
+                      <button type="button" onClick={() => setShowQuickAddSubject(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <input
+                        type="text"
+                        placeholder="কোড (যেমন: ICT_1, BAN_2)"
+                        value={quickSubjectCode}
+                        onChange={(e) => setQuickSubjectCode(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white font-mono uppercase"
+                      />
+                      <input
+                        type="text"
+                        placeholder="নাম বাংলায় (যেমন: তথ্য ও যোগাযোগ প্রযুক্তি)"
+                        value={quickSubjectNameBn}
+                        onChange={(e) => setQuickSubjectNameBn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white"
+                      />
+                      <input
+                        type="text"
+                        placeholder="নাম ইংরেজিতে (ঐচ্ছিক)"
+                        value={quickSubjectNameEn}
+                        onChange={(e) => setQuickSubjectNameEn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white"
+                      />
+                      <div className="flex gap-1.5">
+                        <select
+                          value={quickSubjectClassId}
+                          onChange={(e) => setQuickSubjectClassId(e.target.value)}
+                          className="flex-1 p-1.5 border border-slate-300 rounded bg-white text-xs"
+                        >
+                          <option value="">শ্রেণি নির্বাচন করুন (ঐচ্ছিক)</option>
+                          {classes.map((cls) => (
+                            <option key={cls.id} value={cls.id}>
+                              {cls.nameBn}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={quickLoading}
+                          onClick={handleQuickCreateSubject}
+                          className="px-3 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {quickLoading ? "..." : "সংরক্ষণ"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Quick Edit Subject Drawer */}
+                {showQuickEditSubject && (
+                  <div className="col-span-full p-3 bg-slate-50 border border-slate-300 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between font-bold text-slate-800 text-xs">
+                      <span>নির্বাচিত বিষয় সম্পাদনা করুন</span>
+                      <button type="button" onClick={() => setShowQuickEditSubject(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        placeholder="কোড"
+                        value={quickSubjectCode}
+                        onChange={(e) => setQuickSubjectCode(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white font-mono uppercase"
+                      />
+                      <input
+                        type="text"
+                        placeholder="নাম বাংলায়"
+                        value={quickSubjectNameBn}
+                        onChange={(e) => setQuickSubjectNameBn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white"
+                      />
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="নাম ইংরেজিতে"
+                          value={quickSubjectNameEn}
+                          onChange={(e) => setQuickSubjectNameEn(e.target.value)}
+                          className="flex-1 p-1.5 border border-slate-300 rounded bg-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={quickLoading}
+                          onClick={handleQuickEditSubject}
+                          className="px-3 bg-slate-700 text-white rounded font-semibold hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          {quickLoading ? "..." : "আপডেট"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Quick Add Chapter Drawer */}
+                {showQuickAddChapter && (
+                  <div className="col-span-full p-3 bg-amber-50/80 border border-amber-300 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between font-bold text-amber-900 text-xs">
+                      <span>নতুন অধ্যায় যোগ করুন (বিষয়: {currentSubjectObj?.nameBn || "নির্বাচিত বিষয়"})</span>
+                      <button type="button" onClick={() => setShowQuickAddChapter(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <input
+                        type="number"
+                        placeholder="অধ্যায় নং"
+                        value={quickChapterNum}
+                        onChange={(e) => setQuickChapterNum(Number(e.target.value))}
+                        className="p-1.5 border border-slate-300 rounded bg-white font-mono"
+                      />
+                      <input
+                        type="text"
+                        placeholder="অধ্যায়ের নাম বাংলায়"
+                        value={quickChapterNameBn}
+                        onChange={(e) => setQuickChapterNameBn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white sm:col-span-2"
+                      />
+                      <button
+                        type="button"
+                        disabled={quickLoading}
+                        onClick={handleQuickCreateChapter}
+                        className="bg-amber-600 text-white rounded font-semibold hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {quickLoading ? "..." : "অধ্যায় সংরক্ষণ"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Quick Edit Chapter Drawer */}
+                {showQuickEditChapter && (
+                  <div className="col-span-full p-3 bg-slate-50 border border-slate-300 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between font-bold text-slate-800 text-xs">
+                      <span>নির্বাচিত অধ্যায় সম্পাদনা করুন</span>
+                      <button type="button" onClick={() => setShowQuickEditChapter(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <input
+                        type="number"
+                        placeholder="অধ্যায় নং"
+                        value={quickChapterNum}
+                        onChange={(e) => setQuickChapterNum(Number(e.target.value))}
+                        className="p-1.5 border border-slate-300 rounded bg-white font-mono"
+                      />
+                      <input
+                        type="text"
+                        placeholder="অধ্যায়ের নাম বাংলায়"
+                        value={quickChapterNameBn}
+                        onChange={(e) => setQuickChapterNameBn(e.target.value)}
+                        className="p-1.5 border border-slate-300 rounded bg-white sm:col-span-2"
+                      />
+                      <button
+                        type="button"
+                        disabled={quickLoading}
+                        onClick={handleQuickEditChapter}
+                        className="bg-slate-700 text-white rounded font-semibold hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {quickLoading ? "..." : "অধ্যায় আপডেট"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Board and Year Reference */}
@@ -1190,18 +1867,30 @@ export function QuestionManager() {
                 </div>
               )}
 
-              {/* MCQ Options A, B, C, D */}
+              {/* MCQ Dynamic Options with Add & Delete Option buttons */}
               {createType === "MCQ" && (
                 <div className="space-y-2">
-                  <label className="block font-bold text-slate-800">
-                    অপশনসমূহ (সঠিক অপশনটিতে রেডিও টিক দিন):
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-slate-800">
+                      অপশনসমূহ (সঠিক অপশনটিতে রেডিও টিক দিন):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAddOption}
+                      className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>নতুন অপশন যোগ করুন</span>
+                    </button>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {options.map((opt, idx) => (
+                    {options.map((opt) => (
                       <div
                         key={opt.optionKey}
-                        className={`p-2 rounded-lg border flex items-center gap-2 ${
-                          opt.isCorrect ? "border-emerald-500 bg-emerald-50/30" : "border-slate-200"
+                        className={`p-2 rounded-xl border flex items-center gap-2 transition ${
+                          opt.isCorrect
+                            ? "border-emerald-500 bg-emerald-50/40 ring-1 ring-emerald-500"
+                            : "border-slate-200 hover:border-slate-300 bg-white"
                         }`}
                       >
                         <input
@@ -1213,8 +1902,10 @@ export function QuestionManager() {
                               prev.map((o) => ({ ...o, isCorrect: o.optionKey === opt.optionKey }))
                             );
                           }}
+                          className="w-4 h-4 text-emerald-600 accent-emerald-600 cursor-pointer shrink-0"
+                          title="সঠিক উত্তর হিসেবে চিহ্নিত করুন"
                         />
-                        <span className="font-bold text-slate-700 w-4">{opt.optionKey}.</span>
+                        <span className="font-bold text-slate-700 w-5 shrink-0">{opt.optionKey}.</span>
                         <input
                           type="text"
                           required
@@ -1226,8 +1917,18 @@ export function QuestionManager() {
                             );
                           }}
                           placeholder={`অপশন ${opt.optionKey} এর টেক্সট`}
-                          className="flex-1 p-1.5 border border-slate-300 rounded text-xs outline-none bg-white"
+                          className="flex-1 p-1.5 border border-slate-300 rounded-lg text-xs outline-none bg-white focus:border-emerald-600"
                         />
+                        {options.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveOption(opt.optionKey)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0"
+                            title="অপশনটি মুছুন"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1251,7 +1952,7 @@ export function QuestionManager() {
                   <label className="block font-bold text-slate-800">
                     সৃজনশীল উপপ্রশ্নসমূহ (ক: ১, খ: ২, গ: ৩, ঘ: ৪ = ১০ নম্বর):
                   </label>
-                  {subparts.map((sp, idx) => (
+                  {subparts.map((sp) => (
                     <div key={sp.partLabel} className="p-3 border border-slate-200 rounded-xl bg-slate-50/60 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-emerald-800">
@@ -1316,7 +2017,10 @@ export function QuestionManager() {
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setEditingQuestion(null);
+                  }}
                   className="px-4 py-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition"
                 >
                   বাতিল
@@ -1326,7 +2030,7 @@ export function QuestionManager() {
                   disabled={submitting}
                   className="px-5 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition disabled:opacity-50"
                 >
-                  {submitting ? "সংরক্ষণ হচ্ছে..." : "প্রশ্ন সংরক্ষণ করুন"}
+                  {submitting ? "সংরক্ষণ হচ্ছে..." : editingQuestion ? "আপডেট সংরক্ষণ করুন" : "প্রশ্ন সংরক্ষণ করুন"}
                 </button>
               </div>
             </form>

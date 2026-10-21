@@ -139,7 +139,7 @@ export function CurriculumManager() {
 
   // Edit Modal state
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editingEntity, setEditingEntity] = useState<"class" | "group" | "subject" | "">("");
+  const [editingEntity, setEditingEntity] = useState<"class" | "group" | "subject" | "chapter" | "">("");
   const [editFormData, setEditFormData] = useState<Record<string, any>>({});
 
   // Teacher Assignment Modal
@@ -328,19 +328,31 @@ export function CurriculumManager() {
   };
 
   // Open Edit Modal for standard academic entities
-  const handleOpenEdit = (entity: "class" | "group" | "subject", item: any) => {
+  const handleOpenEdit = (entity: "class" | "group" | "subject" | "chapter", item: any) => {
     setEditingEntity(entity);
-    setEditFormData({
-      id: item.id,
-      code: item.code || "",
-      nameBn: item.nameBn || "",
-      nameEn: item.nameEn || "",
-      orderIndex: item.orderIndex ?? 0,
-      category: item.category || "HSC",
-      classId: item.classId || "",
-      groupId: item.groupId || "",
-      isActive: item.isActive,
-    });
+    if (entity === "chapter") {
+      setEditFormData({
+        id: item.id,
+        chapterNum: item.chapterNum ?? 1,
+        nameBn: item.nameBn || "",
+        nameEn: item.nameEn || "",
+        orderIndex: item.orderIndex ?? item.chapterNum ?? 0,
+        subjectId: selectedSubjectId,
+        isActive: item.isActive,
+      });
+    } else {
+      setEditFormData({
+        id: item.id,
+        code: item.code || "",
+        nameBn: item.nameBn || "",
+        nameEn: item.nameEn || "",
+        orderIndex: item.orderIndex ?? 0,
+        category: item.category || "HSC",
+        classId: item.classId || "",
+        groupId: item.groupId || "",
+        isActive: item.isActive,
+      });
+    }
     setShowEditModal(true);
   };
 
@@ -926,10 +938,18 @@ export function CurriculumManager() {
                           {c.isActive ? "সক্রিয়" : "আর্কাইভড"}
                         </button>
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                        <button
+                          onClick={() => handleOpenEdit("chapter", c)}
+                          className="px-2 py-1 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition text-xs font-medium inline-flex items-center gap-1"
+                          title="সম্পাদনা করুন"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>সম্পাদনা</span>
+                        </button>
                         <button
                           onClick={() => handleDelete("chapter", c.id)}
-                          className="text-rose-600 hover:text-rose-800"
+                          className="p-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition inline-block"
                           title="মুছুন"
                         >
                           <Trash2 className="w-3.5 h-3.5 inline" />
@@ -1617,6 +1637,8 @@ export function CurriculumManager() {
                     ? "অ্যাকাডেমিক শ্রেণি সম্পাদনা"
                     : editingEntity === "group"
                     ? "অ্যাকাডেমিক বিভাগ / গ্রুপ সম্পাদনা"
+                    : editingEntity === "chapter"
+                    ? "অধ্যায় সম্পাদনা"
                     : "বিষয় সম্পাদনা"}
                 </span>
               </h3>
@@ -1629,16 +1651,31 @@ export function CurriculumManager() {
             </div>
 
             <form onSubmit={handleEditSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">কোড (Code)</label>
-                <input
-                  type="text"
-                  required
-                  value={editFormData.code || ""}
-                  onChange={(e) => setEditFormData({ ...editFormData, code: e.target.value })}
-                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-emerald-600 font-mono"
-                />
-              </div>
+              {editingEntity === "chapter" ? (
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">অধ্যায় নম্বর (Chapter Number)</label>
+                  <input
+                    type="number"
+                    required
+                    value={editFormData.chapterNum || 1}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, chapterNum: parseInt(e.target.value, 10) })
+                    }
+                    className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">কোড (Code)</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.code || ""}
+                    onChange={(e) => setEditFormData({ ...editFormData, code: e.target.value })}
+                    className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">নাম (বাংলা)</label>
