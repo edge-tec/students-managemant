@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, Suspense } from "react";
+import React, { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
@@ -78,6 +78,19 @@ interface ExaminationBoard {
   nameEn: string;
 }
 
+interface AppliedFilterCriteria {
+  category?: string;
+  subjectId?: string;
+  paperId?: string;
+  paperNumber?: string;
+  chapterId?: string;
+  boardId?: string;
+  year?: string;
+  difficulty?: string;
+  type?: string;
+  searchQuery?: string;
+}
+
 function QuestionBankContent() {
   const { locale, t, formatNumber } = useI18n();
   const searchParams = useSearchParams();
@@ -94,7 +107,7 @@ function QuestionBankContent() {
   const [subjects, setSubjects] = useState<CurriculumSubject[]>([]);
   const [boards, setBoards] = useState<ExaminationBoard[]>([]);
 
-  // Filter States
+  // Staged Filter Input States (updated by controls before submit)
   const [category, setCategory] = useState(searchParams.get("category") || "");
   const [subjectId, setSubjectId] = useState(searchParams.get("subjectId") || "");
   const [paperId, setPaperId] = useState(searchParams.get("paperId") || "");
@@ -106,22 +119,55 @@ function QuestionBankContent() {
   const [type, setType] = useState(searchParams.get("type") || "");
   const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
 
-  // Check if ANY filter option is currently selected
-  // On default page (all filters empty/default), no questions are shown.
-  // When user filters ANY option (category, subject, paper, chapter, board, year, difficulty, type, or search),
-  // questions matching that filter are displayed.
-  const hasActiveFilter = Boolean(
-    category ||
-    subjectId ||
-    paperId ||
-    paperNumber ||
-    chapterId ||
-    boardId ||
-    year ||
-    difficulty ||
-    type ||
-    searchQuery.trim()
-  );
+  // Helper to test if criteria has any valid filter
+  const hasCriteria = (c: AppliedFilterCriteria | null): boolean => {
+    if (!c) return false;
+    return Boolean(
+      c.category ||
+      c.subjectId ||
+      c.paperId ||
+      c.paperNumber ||
+      c.chapterId ||
+      c.boardId ||
+      c.year ||
+      c.difficulty ||
+      c.type ||
+      c.searchQuery?.trim()
+    );
+  };
+
+  // Determine initial submitted criteria: only submit on load if explicit URL parameters exist
+  const getInitialApplied = (): AppliedFilterCriteria | null => {
+    const cat = searchParams.get("category") || "";
+    const sub = searchParams.get("subjectId") || "";
+    const pap = searchParams.get("paperId") || "";
+    const papNum = searchParams.get("paperNumber") || "";
+    const ch = searchParams.get("chapterId") || "";
+    const brd = searchParams.get("boardId") || "";
+    const yr = searchParams.get("year") || "";
+    const diff = searchParams.get("difficulty") || "";
+    const tp = searchParams.get("type") || "";
+    const q = searchParams.get("q") || "";
+
+    if (cat || sub || pap || papNum || ch || brd || yr || diff || tp || q.trim()) {
+      return {
+        category: cat,
+        subjectId: sub,
+        paperId: pap,
+        paperNumber: papNum,
+        chapterId: ch,
+        boardId: brd,
+        year: yr,
+        difficulty: diff,
+        type: tp,
+        searchQuery: q.trim(),
+      };
+    }
+    return null;
+  };
+
+  const [appliedCriteria, setAppliedCriteria] = useState<AppliedFilterCriteria | null>(getInitialApplied);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load curriculum metadata for dropdowns
   useEffect(() => {
@@ -141,8 +187,8 @@ function QuestionBankContent() {
   // Available papers
   const availablePapers = currentSubject?.papers || [];
 
-  const loadQuestions = useCallback(() => {
-    if (!hasActiveFilter) {
+  const fetchQuestions = useCallback((criteria: AppliedFilterCriteria | null, targetPage = 1) => {
+    if (!hasCriteria(criteria)) {
       setQuestions([]);
       setTotalCount(0);
       setTotalPages(1);
@@ -150,22 +196,28 @@ function QuestionBankContent() {
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     const params = new URLSearchParams();
-    if (category) params.set("category", category);
-    if (subjectId) params.set("subjectId", subjectId);
-    if (paperId) params.set("paperId", paperId);
-    if (paperNumber) params.set("paperNumber", paperNumber);
-    if (chapterId) params.set("chapterId", chapterId);
-    if (boardId) params.set("boardId", boardId);
-    if (year) params.set("year", year);
-    if (difficulty) params.set("difficulty", difficulty);
-    if (type) params.set("type", type);
-    if (searchQuery.trim()) params.set("q", searchQuery.trim());
-    params.set("page", String(page));
+    if (criteria?.category) params.set("category", criteria.category);
+    if (criteria?.subjectId) params.set("subjectId", criteria.subjectId);
+    if (criteria?.paperId) params.set("paperId", criteria.paperId);
+    if (criteria?.paperNumber) params.set("paperNumber", criteria.paperNumber);
+    if (criteria?.chapterId) params.set("chapterId", criteria.chapterId);
+    if (criteria?.boardId) params.set("boardId", criteria.boardId);
+    if (criteria?.year) params.set("year", criteria.year);
+    if (criteria?.difficulty) params.set("difficulty", criteria.difficulty);
+    if (criteria?.type) params.set("type", criteria.type);
+    if (criteria?.searchQuery?.trim()) params.set("q", criteria.searchQuery.trim());
+    params.set("page", String(targetPage));
     params.set("limit", "10");
 
-    fetch(`/api/v1/questions?${params.toString()}`)
+    fetch(`/api/v1/questions?${params.toString()}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => {
         setQuestions(data.questions || []);
@@ -173,26 +225,39 @@ function QuestionBankContent() {
         setTotalPages(data.pagination?.totalPages || 1);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
-  }, [hasActiveFilter, category, subjectId, paperId, paperNumber, chapterId, boardId, year, difficulty, type, searchQuery, page]);
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          setLoading(false);
+        }
+      });
+  }, []);
 
+  // Only fetch when appliedCriteria or page changes, never on default empty load
   useEffect(() => {
-    loadQuestions();
-  }, [loadQuestions]);
+    if (appliedCriteria) {
+      fetchQuestions(appliedCriteria, page);
+    }
+  }, [appliedCriteria, page, fetchQuestions]);
 
   // Sync URL query without full reload
   useEffect(() => {
+    if (!appliedCriteria) {
+      if (typeof window !== "undefined" && window.location.search) {
+        window.history.replaceState(null, "", "/questions");
+      }
+      return;
+    }
     const params = new URLSearchParams();
-    if (category) params.set("category", category);
-    if (subjectId) params.set("subjectId", subjectId);
-    if (paperId) params.set("paperId", paperId);
-    if (paperNumber) params.set("paperNumber", paperNumber);
-    if (chapterId) params.set("chapterId", chapterId);
-    if (boardId) params.set("boardId", boardId);
-    if (year) params.set("year", year);
-    if (difficulty) params.set("difficulty", difficulty);
-    if (type) params.set("type", type);
-    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    if (appliedCriteria.category) params.set("category", appliedCriteria.category);
+    if (appliedCriteria.subjectId) params.set("subjectId", appliedCriteria.subjectId);
+    if (appliedCriteria.paperId) params.set("paperId", appliedCriteria.paperId);
+    if (appliedCriteria.paperNumber) params.set("paperNumber", appliedCriteria.paperNumber);
+    if (appliedCriteria.chapterId) params.set("chapterId", appliedCriteria.chapterId);
+    if (appliedCriteria.boardId) params.set("boardId", appliedCriteria.boardId);
+    if (appliedCriteria.year) params.set("year", appliedCriteria.year);
+    if (appliedCriteria.difficulty) params.set("difficulty", appliedCriteria.difficulty);
+    if (appliedCriteria.type) params.set("type", appliedCriteria.type);
+    if (appliedCriteria.searchQuery?.trim()) params.set("q", appliedCriteria.searchQuery.trim());
     if (page > 1) params.set("page", String(page));
 
     const newQuery = params.toString();
@@ -200,7 +265,7 @@ function QuestionBankContent() {
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", newUrl);
     }
-  }, [category, subjectId, paperId, paperNumber, chapterId, boardId, year, difficulty, type, searchQuery, page]);
+  }, [appliedCriteria, page]);
 
   const toggleSolution = (id: string) => {
     setExpandedSolutions((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -224,32 +289,74 @@ function QuestionBankContent() {
     }
   };
 
-  const handleResetFilters = () => {
-    setCategory("");
-    setSubjectId("");
-    setPaperId("");
-    setPaperNumber("");
-    setChapterId("");
-    setBoardId("");
-    setYear("");
-    setDifficulty("");
-    setType("");
-    setSearchQuery("");
+  // Explicit user submission (Search button, Enter key, or Apply Filters button)
+  const handleApplyFilters = () => {
+    const candidate: AppliedFilterCriteria = {
+      category,
+      subjectId,
+      paperId,
+      paperNumber,
+      chapterId,
+      boardId,
+      year,
+      difficulty,
+      type,
+      searchQuery: searchQuery.trim(),
+    };
+
+    if (!hasCriteria(candidate)) {
+      handleResetFilters();
+      return;
+    }
+
     setPage(1);
+    setAppliedCriteria(candidate);
   };
 
+  // Immediate Category button click (Section 3: treat clicking category as explicit user action)
   const handleSelectCategory = (val: string) => {
     const nextVal = category === val ? "" : val;
     setCategory(nextVal);
+
+    let nextSub = subjectId;
+    let nextPap = paperId;
+    let nextPapNum = paperNumber;
+    let nextChap = chapterId;
+
     if (nextVal && currentSubject && currentSubject.category !== nextVal) {
+      nextSub = "";
+      nextPap = "";
+      nextPapNum = "";
+      nextChap = "";
       setSubjectId("");
       setPaperId("");
       setPaperNumber("");
       setChapterId("");
     }
+
+    const candidate: AppliedFilterCriteria = {
+      category: nextVal,
+      subjectId: nextSub,
+      paperId: nextPap,
+      paperNumber: nextPapNum,
+      chapterId: nextChap,
+      boardId,
+      year,
+      difficulty,
+      type,
+      searchQuery: searchQuery.trim(),
+    };
+
+    if (!hasCriteria(candidate)) {
+      handleResetFilters();
+      return;
+    }
+
     setPage(1);
+    setAppliedCriteria(candidate);
   };
 
+  // Changing dropdowns (updates staged state without immediately fetching)
   const handleSelectSubject = (val: string) => {
     setSubjectId(val);
     setPaperId("");
@@ -261,7 +368,6 @@ function QuestionBankContent() {
         setCategory(foundSub.category);
       }
     }
-    setPage(1);
   };
 
   const handleSelectPaper = (val: string) => {
@@ -272,13 +378,11 @@ function QuestionBankContent() {
       setPaperId(val);
       setPaperNumber("");
     }
-    setPage(1);
   };
 
   const handleSelectChapter = (val: string) => {
     setChapterId(val);
     if (val && !subjectId) {
-      // Find which subject contains this chapter and auto-select
       for (const s of subjects) {
         if (s.chapters?.some((c) => c.id === val)) {
           setSubjectId(s.id);
@@ -287,7 +391,28 @@ function QuestionBankContent() {
         }
       }
     }
+  };
+
+  // Reset clears all filters and returns to empty initial state
+  const handleResetFilters = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setCategory("");
+    setSubjectId("");
+    setPaperId("");
+    setPaperNumber("");
+    setChapterId("");
+    setBoardId("");
+    setYear("");
+    setDifficulty("");
+    setType("");
+    setSearchQuery("");
     setPage(1);
+    setAppliedCriteria(null);
+    setQuestions([]);
+    setTotalCount(0);
+    setTotalPages(1);
   };
 
   const categories = [
@@ -299,58 +424,148 @@ function QuestionBankContent() {
 
   const yearsList = [2024, 2023, 2022, 2021, 2020, 2019, 2018];
 
-  // Active filter tags for one-click removal
-  const activeFilters = [
-    category && {
-      key: "category",
-      label: `ক্যাটাগরি: ${categories.find((c) => c.value === category)?.label || category}`,
-      onRemove: () => { setCategory(""); setPage(1); },
-    },
-    subjectId && {
-      key: "subject",
-      label: `বিষয়: ${subjects.find((s) => s.id === subjectId)?.nameBn || subjectId}`,
-      onRemove: () => { setSubjectId(""); setPaperId(""); setPaperNumber(""); setChapterId(""); setPage(1); },
-    },
-    (paperId || paperNumber) && {
-      key: "paper",
-      label: `পত্র: ${paperNumber ? (paperNumber === "1" ? "১ম পত্র" : "২য় পত্র") : (availablePapers.find((p) => p.id === paperId)?.nameBn || "নির্বাচিত পত্র")}`,
-      onRemove: () => { setPaperId(""); setPaperNumber(""); setPage(1); },
-    },
-    chapterId && {
-      key: "chapter",
-      label: `অধ্যায়: ${
-        currentSubject?.chapters?.find((c) => c.id === chapterId)?.nameBn ||
-        subjects.flatMap((s) => s.chapters || []).find((c) => c.id === chapterId)?.nameBn ||
-        "নির্বাচিত অধ্যায়"
-      }`,
-      onRemove: () => { setChapterId(""); setPage(1); },
-    },
-    boardId && {
-      key: "board",
-      label: `বোর্ড: ${boards.find((b) => b.id === boardId)?.nameBn || boardId}`,
-      onRemove: () => { setBoardId(""); setPage(1); },
-    },
-    year && {
-      key: "year",
-      label: `সাল: ${formatNumber(year)}`,
-      onRemove: () => { setYear(""); setPage(1); },
-    },
-    type && {
-      key: "type",
-      label: `ধরণ: ${type === "MCQ" ? "বহুনির্বাচনি (MCQ)" : "সৃজনশীল (CQ)"}`,
-      onRemove: () => { setType(""); setPage(1); },
-    },
-    difficulty && {
-      key: "difficulty",
-      label: `কঠিনতা: ${difficulty === "EASY" ? "সহজ" : difficulty === "HARD" ? "কঠিন" : "মাঝারি"}`,
-      onRemove: () => { setDifficulty(""); setPage(1); },
-    },
-    searchQuery && {
-      key: "search",
-      label: `অনুসন্ধান: "${searchQuery}"`,
-      onRemove: () => { setSearchQuery(""); setPage(1); },
-    },
-  ].filter(Boolean) as { key: string; label: string; onRemove: () => void }[];
+  // Active filter tags for one-click removal based on submitted criteria
+  const activeFilters = appliedCriteria
+    ? [
+        appliedCriteria.category && {
+          key: "category",
+          label: `ক্যাটাগরি: ${categories.find((c) => c.value === appliedCriteria.category)?.label || appliedCriteria.category}`,
+          onRemove: () => {
+            setCategory("");
+            const updated = { ...appliedCriteria, category: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.subjectId && {
+          key: "subject",
+          label: `বিষয়: ${subjects.find((s) => s.id === appliedCriteria.subjectId)?.nameBn || appliedCriteria.subjectId}`,
+          onRemove: () => {
+            setSubjectId("");
+            setPaperId("");
+            setPaperNumber("");
+            setChapterId("");
+            const updated = {
+              ...appliedCriteria,
+              subjectId: undefined,
+              paperId: undefined,
+              paperNumber: undefined,
+              chapterId: undefined,
+            };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        (appliedCriteria.paperId || appliedCriteria.paperNumber) && {
+          key: "paper",
+          label: `পত্র: ${
+            appliedCriteria.paperNumber
+              ? appliedCriteria.paperNumber === "1"
+                ? "১ম পত্র"
+                : "২য় পত্র"
+              : availablePapers.find((p) => p.id === appliedCriteria.paperId)?.nameBn || "নির্বাচিত পত্র"
+          }`,
+          onRemove: () => {
+            setPaperId("");
+            setPaperNumber("");
+            const updated = { ...appliedCriteria, paperId: undefined, paperNumber: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.chapterId && {
+          key: "chapter",
+          label: `অধ্যায়: ${
+            currentSubject?.chapters?.find((c) => c.id === appliedCriteria.chapterId)?.nameBn ||
+            subjects.flatMap((s) => s.chapters || []).find((c) => c.id === appliedCriteria.chapterId)?.nameBn ||
+            "নির্বাচিত অধ্যায়"
+          }`,
+          onRemove: () => {
+            setChapterId("");
+            const updated = { ...appliedCriteria, chapterId: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.boardId && {
+          key: "board",
+          label: `বোর্ড: ${boards.find((b) => b.id === appliedCriteria.boardId)?.nameBn || appliedCriteria.boardId}`,
+          onRemove: () => {
+            setBoardId("");
+            const updated = { ...appliedCriteria, boardId: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.year && {
+          key: "year",
+          label: `সাল: ${formatNumber(appliedCriteria.year)}`,
+          onRemove: () => {
+            setYear("");
+            const updated = { ...appliedCriteria, year: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.type && {
+          key: "type",
+          label: `ধরণ: ${appliedCriteria.type === "MCQ" ? "বহুনির্বাচনি (MCQ)" : "সৃজনশীল (CQ)"}`,
+          onRemove: () => {
+            setType("");
+            const updated = { ...appliedCriteria, type: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.difficulty && {
+          key: "difficulty",
+          label: `কঠিনতা: ${appliedCriteria.difficulty === "EASY" ? "সহজ" : appliedCriteria.difficulty === "HARD" ? "কঠিন" : "মাঝারি"}`,
+          onRemove: () => {
+            setDifficulty("");
+            const updated = { ...appliedCriteria, difficulty: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+        appliedCriteria.searchQuery && {
+          key: "search",
+          label: `অনুসন্ধান: "${appliedCriteria.searchQuery}"`,
+          onRemove: () => {
+            setSearchQuery("");
+            const updated = { ...appliedCriteria, searchQuery: undefined };
+            if (!hasCriteria(updated)) {
+              handleResetFilters();
+            } else {
+              setAppliedCriteria(updated);
+            }
+          },
+        },
+      ].filter(Boolean) as { key: string; label: string; onRemove: () => void }[]
+    : [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -378,31 +593,44 @@ function QuestionBankContent() {
 
       {/* Filter and Search Panel */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        {/* Search Bar & Reset */}
+        {/* Search Bar, Search Button & Reset */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setPage(1);
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleApplyFilters();
+                }
               }}
               placeholder="বাংলা বা ইংরেজিতে প্রশ্ন বা কীওয়ার্ড অনুসন্ধান করুন..."
               className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:border-emerald-600 outline-none"
             />
           </div>
 
-          <button
-            type="button"
-            onClick={handleResetFilters}
-            className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shrink-0 cursor-pointer"
-            title="সব ফিল্টার রিসেট করুন"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>ফিল্টার রিসেট</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleApplyFilters}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition shadow-xs cursor-pointer"
+            >
+              <Search className="w-4 h-4" />
+              <span>অনুসন্ধান করুন</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-1.5 transition cursor-pointer"
+              title="সব ফিল্টার রিসেট করুন"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>রিসেট</span>
+            </button>
+          </div>
         </div>
 
         {/* Category Pills */}
@@ -503,10 +731,7 @@ function QuestionBankContent() {
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">শিক্ষা বোর্ড (Board)</label>
             <select
               value={boardId}
-              onChange={(e) => {
-                setBoardId(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setBoardId(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
               <option value="">শিক্ষা বোর্ড নির্বাচন করুন</option>
@@ -523,10 +748,7 @@ function QuestionBankContent() {
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">পরীক্ষার সাল (Year)</label>
             <select
               value={year}
-              onChange={(e) => {
-                setYear(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setYear(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
               <option value="">পরীক্ষার সাল নির্বাচন করুন</option>
@@ -543,10 +765,7 @@ function QuestionBankContent() {
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">ধরণ (Type)</label>
             <select
               value={type}
-              onChange={(e) => {
-                setType(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setType(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600"
             >
               <option value="">ধরণ নির্বাচন করুন</option>
@@ -554,6 +773,21 @@ function QuestionBankContent() {
               <option value="CQ">সৃজনশীল (CQ)</option>
             </select>
           </div>
+        </div>
+
+        {/* Action Bar for Dropdowns */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-2 border-t border-slate-100">
+          <p className="text-[11px] text-slate-400">
+            * পছন্দের ফিল্টার নির্বাচন করে &ldquo;ফিল্টার প্রয়োগ করুন&rdquo; বাটনে ক্লিক করুন
+          </p>
+          <button
+            type="button"
+            onClick={handleApplyFilters}
+            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition shadow-xs cursor-pointer shrink-0"
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>ফিল্টার প্রয়োগ করুন</span>
+          </button>
         </div>
 
         {/* Active Filter Chips / Badges */}
@@ -580,8 +814,22 @@ function QuestionBankContent() {
         )}
       </div>
 
-      {/* Question Results - Only visible when user filters ANY option */}
-      {hasActiveFilter && (
+      {/* Question Results or Empty State */}
+      {!appliedCriteria ? (
+        <div className="bg-white p-12 sm:p-16 rounded-2xl border border-slate-200 text-center space-y-4 shadow-xs">
+          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-100 shadow-2xs">
+            <Filter className="w-8 h-8 text-emerald-600" />
+          </div>
+          <div className="max-w-md mx-auto space-y-2">
+            <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+              প্রশ্ন দেখতে বিষয়, শ্রেণি, বোর্ড বা অন্যান্য ফিল্টার নির্বাচন করুন অথবা প্রশ্ন খুঁজুন।
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+              উপরের ক্যাটাগরি বাটনে ক্লিক করুন অথবা বিষয়, অধ্যায়, বোর্ড বা সাল নির্বাচন করে &ldquo;ফিল্টার প্রয়োগ করুন&rdquo; চাপুন।
+            </p>
+          </div>
+        </div>
+      ) : (
         <>
           {/* Results Header */}
           <div className="flex justify-between items-center text-xs text-slate-500 px-1">
