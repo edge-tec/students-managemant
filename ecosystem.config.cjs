@@ -6,8 +6,7 @@ module.exports = {
   apps: [
     {
       name: "m.eliteali.com",
-      script: path.join(__dirname, "node_modules", "next", "dist", "bin", "next"),
-      args: `start -p ${port}`,
+      script: path.join(__dirname, "start.js"),
       cwd: __dirname,
       instances: 1,
       exec_mode: "fork",
