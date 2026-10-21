@@ -3,12 +3,14 @@ set -e
 
 # ==============================================================================
 # Students Management & AI Educational Platform - Automated aaPanel Installer
-# Domain: app.eliteali.com
+# Domain: m.eliteali.com (configurable via DOMAIN variable)
 # Database: student_manage (user: student_manage, pass: student_manage)
 # ==============================================================================
 
+DOMAIN="${DOMAIN:-m.eliteali.com}"
+
 echo "=========================================================="
-echo " Starting Automated Installation for app.eliteali.com"
+echo " Starting Automated Installation for ${DOMAIN}"
 echo "=========================================================="
 
 # 1. System packages
@@ -43,9 +45,9 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE student_manage TO stu
 sudo -u postgres psql -c "ALTER DATABASE student_manage OWNER TO student_manage;"
 
 # 4. Clone or update repository
-echo "[4/8] Setting up project directory at /www/wwwroot/app.eliteali.com..."
+echo "[4/8] Setting up project directory at /www/wwwroot/${DOMAIN}..."
 mkdir -p /www/wwwroot
-TARGET_DIR="/www/wwwroot/app.eliteali.com"
+TARGET_DIR="/www/wwwroot/${DOMAIN}"
 
 if [ -d "$TARGET_DIR/.git" ]; then
     echo "Directory exists with git. Pulling latest code..."
@@ -76,11 +78,11 @@ fi
 
 # 5. Create production .env
 echo "[5/8] Creating production .env file..."
-cat << 'EOF' > .env
+cat << EOF > .env
 DATABASE_URL="postgresql://student_manage:student_manage@127.0.0.1:5432/student_manage?schema=public"
 JWT_SECRET="eliteali_jwt_secret_production_key_9876543210"
 NEXTAUTH_SECRET="eliteali_nextauth_production_key_0123456789"
-NEXT_PUBLIC_APP_URL="https://app.eliteali.com"
+NEXT_PUBLIC_APP_URL="https://${DOMAIN}"
 NEXT_PUBLIC_DEFAULT_LOCALE="bn"
 GEMINI_API_KEY=""
 UPLOAD_DIR="./uploads"
@@ -104,7 +106,7 @@ npm run build
 # 8. Start with PM2
 echo "[8/8] Starting PM2 process manager..."
 npm install -g pm2
-pm2 delete "app.eliteali.com" 2>/dev/null || true
+pm2 delete "${DOMAIN}" 2>/dev/null || true
 pm2 start ecosystem.config.cjs
 pm2 save
 
@@ -112,10 +114,10 @@ echo "=========================================================="
 echo " INSTALLATION SUCCESSFUL!"
 echo " App running on http://127.0.0.1:3005"
 echo " Next steps in aaPanel:"
-echo " 1. Go to Website -> app.eliteali.com -> Reverse Proxy"
+echo " 1. Go to Website -> ${DOMAIN} -> Reverse Proxy"
 echo " 2. Set Target URL to: http://127.0.0.1:3005"
 echo " 3. Apply SSL certificate (Let's Encrypt)"
-echo " 4. Admin Login: https://app.eliteali.com/admin/login"
+echo " 4. Admin Login: https://${DOMAIN}/admin/login"
 echo "    Email: admin@eliteali.com"
 echo "    Password: AdminPassword2026!"
 echo "=========================================================="

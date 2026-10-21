@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "app.eliteali.com",
+      name: "m.eliteali.com",
       script: "npm",
       args: "start -- -p 3005",
       cwd: "./",
