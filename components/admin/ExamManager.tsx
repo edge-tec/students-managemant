@@ -16,6 +16,12 @@ import {
   X,
   ChevronRight,
   Filter,
+  Share2,
+  Copy,
+  Check,
+  ExternalLink,
+  Link2,
+  MessageCircle,
 } from "lucide-react";
 import { MathText } from "@/components/ui/MathText";
 
@@ -111,6 +117,45 @@ export function ExamManager() {
 
   // Preview Modal
   const [previewExam, setPreviewExam] = useState<any | null>(null);
+
+  // Share & Link Modal state
+  const [shareExamModal, setShareExamModal] = useState<{
+    id: string;
+    titleBn: string;
+    titleEn?: string | null;
+    status: string;
+    category?: string;
+    totalMarks?: number;
+    durationMinutes?: number;
+    isNew?: boolean;
+  } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const getExamFullUrl = (examId: string) => {
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}/exams/${examId}`;
+    }
+    return `/exams/${examId}`;
+  };
+
+  const handleCopyExamLink = (examId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const url = getExamFullUrl(examId);
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url);
+    } else {
+      const el = document.createElement("textarea");
+      el.value = url;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setCopiedId(examId);
+    setTimeout(() => {
+      setCopiedId((current) => (current === examId ? null : current));
+    }, 2500);
+  };
 
   const loadExams = useCallback(async () => {
     setLoading(true);
@@ -250,14 +295,26 @@ export function ExamManager() {
         body: JSON.stringify(payload),
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Failed to create exam");
       }
-
-      setSuccessMsg("Exam created successfully!");
+      setSuccessMsg("পরীক্ষা সফলভাবে তৈরি হয়েছে! নিচের লিংকটি শিক্ষার্থীদের সাথে শেয়ার করতে পারেন।");
       setIsModalOpen(false);
       loadExams();
+
+      if (data?.exam) {
+        setShareExamModal({
+          id: data.exam.id,
+          titleBn: data.exam.titleBn,
+          titleEn: data.exam.titleEn,
+          status: data.exam.status || "DRAFT",
+          category: data.exam.category,
+          totalMarks: data.exam.totalMarks,
+          durationMinutes: data.exam.durationMinutes,
+          isNew: true,
+        });
+      }
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -279,6 +336,26 @@ export function ExamManager() {
         throw new Error(data.error || "Failed to publish exam");
       }
       setSuccessMsg("Exam published successfully!");
+      loadExams();
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    }
+  };
+
+  const handlePublishFromShareModal = async (examId: string) => {
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/v1/admin/exams/${examId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "publish" }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to publish exam");
+      }
+      setSuccessMsg("পরীক্ষা সফলভাবে পাবলিশ করা হয়েছে!");
+      setShareExamModal((prev) => (prev && prev.id === examId ? { ...prev, status: "PUBLISHED" } : prev));
       loadExams();
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -484,7 +561,49 @@ export function ExamManager() {
                         {ex.status}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-right space-x-2">
+                    <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                      {/* Copy / Share Link Modal */}
+                      <button
+                        onClick={() =>
+                          setShareExamModal({
+                            id: ex.id,
+                            titleBn: ex.titleBn,
+                            titleEn: ex.titleEn,
+                            status: ex.status,
+                            category: ex.category,
+                            totalMarks: ex.totalMarks,
+                            durationMinutes: ex.durationMinutes,
+                            isNew: false,
+                          })
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
+                          copiedId === ex.id
+                            ? "bg-emerald-600 text-white border-emerald-600"
+                            : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                        }`}
+                        title="পরীক্ষার লিংক কপি ও শেয়ার করুন"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>লিংক</span>
+                      </button>
+
+                      {/* Quick 1-click Copy */}
+                      <button
+                        onClick={(e) => handleCopyExamLink(ex.id, e)}
+                        className={`p-1.5 rounded transition ${
+                          copiedId === ex.id
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                        }`}
+                        title={copiedId === ex.id ? "লিংক কপি হয়েছে!" : "সরাসরি লিংক কপি করুন"}
+                      >
+                        {copiedId === ex.id ? (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                      </button>
+
                       <button
                         onClick={() => handlePreviewExam(ex.id)}
                         className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded"
@@ -998,6 +1117,46 @@ export function ExamManager() {
               </div>
             </div>
 
+            {/* Share Link Banner */}
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+              <div className="truncate flex items-center gap-1.5 font-mono text-emerald-950 min-w-0">
+                <Link2 className="w-4 h-4 text-emerald-700 flex-shrink-0" />
+                <span className="truncate">{getExamFullUrl(previewExam.id)}</span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleCopyExamLink(previewExam.id)}
+                  className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition ${
+                    copiedId === previewExam.id
+                      ? "bg-emerald-600 text-white"
+                      : "bg-emerald-700 hover:bg-emerald-800 text-white"
+                  }`}
+                >
+                  {copiedId === previewExam.id ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>কপি হয়েছে</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>লিংক কপি</span>
+                    </>
+                  )}
+                </button>
+                <a
+                  href={`/exams/${previewExam.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 transition"
+                  title="নতুন ট্যাবে লিংক ওপেন করুন"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            </div>
+
             <div>
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
                 সংযুক্ত প্রশ্ন তালিকা ({previewExam.examQuestions?.length || 0} টি)
@@ -1018,6 +1177,166 @@ export function ExamManager() {
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold"
               >
                 Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share / Copy Exam Link Modal */}
+      {shareExamModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b pb-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`p-2.5 rounded-xl ${
+                    shareExamModal.isNew
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-indigo-100 text-indigo-700"
+                  }`}
+                >
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">
+                    {shareExamModal.isNew
+                      ? "পরীক্ষা তৈরি সম্পন্ন! লিংক শেয়ার করুন"
+                      : "পরীক্ষার লিংক ও শেয়ার অপশন"}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {shareExamModal.isNew
+                      ? "পরীক্ষা সফলভাবে তৈরি হয়েছে। নিচের লিংকটি কপি করে শিক্ষার্থীদের সাথে শেয়ার করুন।"
+                      : "শিক্ষার্থীরা এই লিংকে প্রবেশ করে পরীক্ষায় সরাসরি অংশ নিতে পারবে।"}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShareExamModal(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Exam info badge */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 text-sm">{shareExamModal.titleBn}</span>
+                <span
+                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    shareExamModal.status === "PUBLISHED"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {shareExamModal.status === "PUBLISHED" ? "পাবলিশড (সক্রিয়)" : "খসড়া (DRAFT)"}
+                </span>
+              </div>
+              {shareExamModal.titleEn && (
+                <div className="text-xs text-slate-500">{shareExamModal.titleEn}</div>
+              )}
+            </div>
+
+            {/* Warning if Draft */}
+            {shareExamModal.status !== "PUBLISHED" && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1.5 flex-1">
+                  <p className="font-semibold text-amber-900">
+                    সতর্কতা: পরীক্ষাটি বর্তমানে খসড়া (DRAFT) অবস্থায় আছে।
+                  </p>
+                  <p className="text-amber-700 leading-relaxed">
+                    শিক্ষার্থীরা যাতে লিংকে প্রবেশ করে পরীক্ষা শুরু করতে পারে, তার জন্য পরীক্ষাটি &quot;Publish&quot; করা প্রয়োজন।
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handlePublishFromShareModal(shareExamModal.id)}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs transition shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>এখনই পাবলিশ করুন (Publish Now)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Direct Link Box */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                পরীক্ষার সরাসরি শেয়ার লিংক (Direct Exam Link)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={getExamFullUrl(shareExamModal.id)}
+                  className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg text-slate-800 outline-none focus:border-emerald-600 select-all"
+                  onFocus={(e) => e.target.select()}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopyExamLink(shareExamModal.id)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition flex-shrink-0 shadow-xs ${
+                    copiedId === shareExamModal.id
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-900 hover:bg-black text-white"
+                  }`}
+                >
+                  {copiedId === shareExamModal.id ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>কপি হয়েছে!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>কপি করুন</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Share Shortcuts */}
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <label className="block text-xs font-semibold text-slate-700">
+                সরাসরি শেয়ার ও লিংক পরীক্ষা
+              </label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <a
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                    `🎓 *${shareExamModal.titleBn}*\nঅনলাইন পরীক্ষায় অংশ নিতে নিচের লিংকে প্রবেশ করুন:\n👉 ${getExamFullUrl(shareExamModal.id)}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-semibold transition"
+                >
+                  <MessageCircle className="w-4 h-4 text-emerald-600" />
+                  <span>WhatsApp-এ শেয়ার</span>
+                </a>
+
+                <a
+                  href={`/exams/${shareExamModal.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl text-xs font-semibold transition"
+                >
+                  <ExternalLink className="w-4 h-4 text-slate-600" />
+                  <span>লিংক ওপেন করুন</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShareExamModal(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition"
+              >
+                বন্ধ করুন (Close)
               </button>
             </div>
           </div>
