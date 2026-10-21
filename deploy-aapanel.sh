@@ -94,7 +94,7 @@ npm install --legacy-peer-deps
 npx prisma generate
 npx prisma db push
 node scripts/seed.mjs
-node scripts/provision-admin.mjs --email="admin@eliteali.com" --name="EliteAli Admin" --password="AdminPassword2026!" --reset-password
+node scripts/provision-admin.mjs --email="admin@eliteali.com" --name="EliteAli Admin" --password="edge2129" --reset-password
 
 mkdir -p uploads/pdfs
 chmod -R 775 uploads
@@ -119,5 +119,5 @@ echo " 2. Set Target URL to: http://127.0.0.1:3005"
 echo " 3. Apply SSL certificate (Let's Encrypt)"
 echo " 4. Admin Login: https://${DOMAIN}/admin/login"
 echo "    Email: admin@eliteali.com"
-echo "    Password: AdminPassword2026!"
+echo "    Password: edge2129"
 echo "=========================================================="
