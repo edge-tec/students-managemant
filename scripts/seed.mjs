@@ -101,6 +101,7 @@ async function main() {
       update: {},
       create: c,
     });
+  }
   console.log("✓ Academic classes (SSC & HSC) seeded");
 
   // 2.6 Academic Groups (Science, Commerce, Humanities, General, Vocational)
