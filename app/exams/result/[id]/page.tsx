@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/context";
 import { MathText } from "@/components/ui/MathText";
@@ -38,6 +38,8 @@ interface ExamResultPayload {
     unansweredCount: number;
     accuracyPct: number;
     timeSpentSec: number;
+    isPassed?: boolean | null;
+    isReleased?: boolean | null;
     rankInCohort?: number | null;
     cohortSize?: number | null;
     percentile?: number | null;
@@ -74,10 +76,33 @@ export default function ExamResultPage() {
   const [data, setData] = useState<ExamResultPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Leaderboard modal
+  const router = useRouter();
+  const [startingRevision, setStartingRevision] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+
+  const handleStartWrongPractice = async () => {
+    if (!data || startingRevision) return;
+    setStartingRevision(true);
+    try {
+      const res = await fetch("/api/v1/exams/wrong-practice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: data.session.category }),
+      });
+      const json = await res.json();
+      if (json.sessionId) {
+        router.push(`/exams/session/${json.sessionId}`);
+      } else {
+        alert(json.error || "No wrong questions found to practice!");
+        setStartingRevision(false);
+      }
+    } catch (e: any) {
+      alert(e.message || "Failed to start practice");
+      setStartingRevision(false);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/v1/exams/${id}/result`)
@@ -162,12 +187,34 @@ export default function ExamResultPage() {
             <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
               {session.category} • {session.mode}
             </span>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-              {t.exam.examCompleted}
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+                {t.exam.examCompleted}
+              </h1>
+              {result.isPassed !== undefined && result.isPassed !== null && (
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-black tracking-wide ${
+                    result.isPassed
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                      : "bg-rose-100 text-rose-800 border border-rose-300"
+                  }`}
+                >
+                  {result.isPassed
+                    ? locale === "bn" ? "পাস (PASSED)" : "PASSED"
+                    : locale === "bn" ? "অনুত্তীর্ণ (DID NOT PASS)" : "DID NOT PASS"}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.print()}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold text-slate-700 transition"
+              title="Print Result Report"
+            >
+              {locale === "bn" ? "প্রিন্ট রিপোর্ট" : "Print Report"}
+            </button>
             <button
               onClick={loadLeaderboard}
               className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl text-xs sm:text-sm font-bold text-amber-800 transition flex items-center gap-1.5"
@@ -182,17 +229,21 @@ export default function ExamResultPage() {
               <RotateCcw className="w-4 h-4 text-emerald-600" />
               <span>{t.exam.retakeExam}</span>
             </Link>
-            <Link
-              href="/dashboard"
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition"
-            >
-              {t.nav.dashboard}
-            </Link>
           </div>
         </div>
 
+        {/* Unreleased Results Banner (Policy Protection) */}
+        {result.isReleased === false && (
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-center gap-3 text-amber-900">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div className="text-xs sm:text-sm leading-relaxed">
+              <strong>ফলাফল সংরক্ষণ করা হয়েছে:</strong> পরীক্ষার নির্ধারিত সময়সীমা বা কর্তৃপক্ষের অনুমোদনের পর চূড়ান্ত সমাধান ও মার্কশিট অবমুক্ত করা হবে।
+            </div>
+          </div>
+        )}
+
         {/* Cohort Rank & Percentile Banner */}
-        {result.rankInCohort && (
+        {result.isReleased !== false && result.rankInCohort && (
           <div className="p-4 rounded-xl bg-linear-to-r from-amber-50 to-orange-50 border border-amber-200 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs">
@@ -382,13 +433,15 @@ export default function ExamResultPage() {
           <h2 className="text-xl font-bold text-slate-900">
             {t.exam.detailedSolutions}
           </h2>
-          <Link
-            href="/dashboard/wrong-questions"
-            className="text-xs font-semibold text-rose-600 hover:underline flex items-center gap-1"
+          <button
+            type="button"
+            onClick={handleStartWrongPractice}
+            disabled={startingRevision}
+            className="text-xs font-semibold text-rose-600 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
           >
-            <span>{t.exam.wrongAnswerPractice}</span>
+            <span>{startingRevision ? "রিভিশন তৈরি হচ্ছে..." : t.exam.wrongAnswerPractice}</span>
             <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
+          </button>
         </div>
 
         <div className="space-y-4">

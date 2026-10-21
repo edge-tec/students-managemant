@@ -14,6 +14,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const entity = searchParams.get("entity") || "all";
     const category = searchParams.get("category") as ExamCategoryType | null;
+    const classId = searchParams.get("classId");
+    const groupId = searchParams.get("groupId");
     const subjectId = searchParams.get("subjectId");
     const chapterId = searchParams.get("chapterId");
     const onlyActive = searchParams.get("onlyActive") !== "false";
@@ -23,8 +25,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ classes });
     }
 
+    if (entity === "groups") {
+      const groups = await CurriculumService.listGroups(onlyActive);
+      return NextResponse.json({ groups });
+    }
+
     if (entity === "subjects") {
-      const subjects = await CurriculumService.listSubjects({ category: category || undefined, onlyActive });
+      const subjects = await CurriculumService.listSubjects({
+        category: category || undefined,
+        classId: classId || undefined,
+        groupId: groupId || undefined,
+        onlyActive,
+      });
       return NextResponse.json({ subjects });
     }
 
@@ -43,14 +55,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ boards });
     }
 
-    // Default: Return overview of classes, subjects, and boards
-    const [classes, subjects, boards] = await Promise.all([
+    // Default: Return overview of classes, groups, subjects, and boards
+    const [classes, groups, subjects, boards] = await Promise.all([
       CurriculumService.listClasses(onlyActive),
+      CurriculumService.listGroups(onlyActive),
       CurriculumService.listSubjects({ category: category || undefined, onlyActive }),
       CurriculumService.listBoards(onlyActive),
     ]);
 
-    return NextResponse.json({ classes, subjects, boards });
+    return NextResponse.json({ classes, groups, subjects, boards });
   } catch (error: unknown) {
     const err = error as Error;
     console.error("Admin curriculum GET error:", err);
@@ -71,6 +84,10 @@ export async function POST(req: NextRequest) {
     switch (entity) {
       case "class": {
         const result = await CurriculumService.createClass(payload);
+        return NextResponse.json({ success: true, item: result }, { status: 201 });
+      }
+      case "group": {
+        const result = await CurriculumService.createGroup(payload);
         return NextResponse.json({ success: true, item: result }, { status: 201 });
       }
       case "subject": {
@@ -117,9 +134,19 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Missing entity id" }, { status: 400 });
     }
 
+    if (payload.action === "archive") {
+      payload.isActive = false;
+    } else if (payload.action === "restore") {
+      payload.isActive = true;
+    }
+
     switch (entity) {
       case "class": {
         const result = await CurriculumService.updateClass(id, payload);
+        return NextResponse.json({ success: true, item: result });
+      }
+      case "group": {
+        const result = await CurriculumService.updateGroup(id, payload);
         return NextResponse.json({ success: true, item: result });
       }
       case "subject": {
@@ -170,6 +197,9 @@ export async function DELETE(req: NextRequest) {
     switch (entity) {
       case "class":
         await CurriculumService.deleteClass(id);
+        break;
+      case "group":
+        await CurriculumService.deleteGroup(id);
         break;
       case "subject":
         await CurriculumService.deleteSubject(id);

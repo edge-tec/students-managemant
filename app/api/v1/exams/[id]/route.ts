@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
+import { ExamService } from "@/lib/exams/examService";
 import { ExamSessionStatus } from "@prisma/client";
 
 export async function GET(
@@ -17,6 +18,11 @@ export async function GET(
     const session = await prisma.examSession.findFirst({
       where: { id, studentId: user.id },
       include: {
+        exam: {
+          include: {
+            sections: { orderBy: { orderIndex: "asc" } },
+          },
+        },
         sessionQuestions: {
           orderBy: { orderIndex: "asc" },
           include: {
@@ -54,12 +60,23 @@ export async function GET(
     const now = new Date();
     const isExpired = now.getTime() > new Date(session.serverDeadline).getTime();
     if (isExpired && session.status === ExamSessionStatus.IN_PROGRESS) {
-      // Auto-mark expired
-      await prisma.examSession.update({
-        where: { id: session.id },
-        data: { status: ExamSessionStatus.EXPIRED },
-      });
-      session.status = ExamSessionStatus.EXPIRED;
+      // Auto-finalize and evaluate expired attempt
+      try {
+        const evalRes = await ExamService.submitAndEvaluateExam({
+          sessionId: session.id,
+          studentId: user.id,
+          answers: [],
+          finalizationReason: "TIMEOUT_AUTO_SUBMIT",
+        });
+        session.status = ExamSessionStatus.EVALUATED;
+        session.result = evalRes.result as any;
+      } catch (err) {
+        await prisma.examSession.update({
+          where: { id: session.id },
+          data: { status: ExamSessionStatus.EXPIRED },
+        });
+        session.status = ExamSessionStatus.EXPIRED;
+      }
     }
 
     return NextResponse.json({ session });

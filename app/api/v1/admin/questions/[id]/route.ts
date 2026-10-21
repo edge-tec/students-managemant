@@ -79,8 +79,8 @@ export async function PATCH(
     return NextResponse.json({ success: true, question: updated });
   } catch (error: unknown) {
     const err = error as Error;
-    console.error("Admin update question status error:", err);
-    return NextResponse.json({ error: err.message || "Failed to change question status" }, { status: 500 });
+    const statusCode = err.message.includes("Separation of duties") ? 403 : 400;
+    return NextResponse.json({ error: err.message || "Failed to change question status" }, { status: statusCode });
   }
 }
 

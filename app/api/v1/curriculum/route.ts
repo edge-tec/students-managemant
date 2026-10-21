@@ -7,6 +7,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const categoryParam = searchParams.get("category");
     const classIdParam = searchParams.get("classId");
+    const groupIdParam = searchParams.get("groupId");
 
     const whereSubject: Record<string, unknown> = {
       isActive: true,
@@ -20,8 +21,16 @@ export async function GET(req: NextRequest) {
       whereSubject.classId = classIdParam;
     }
 
-    const [classes, subjects, boards, universities] = await Promise.all([
+    if (groupIdParam) {
+      whereSubject.groupId = groupIdParam;
+    }
+
+    const [classes, groups, subjects, boards, universities] = await Promise.all([
       prisma.academicClass.findMany({
+        where: { isActive: true },
+        orderBy: { orderIndex: "asc" },
+      }),
+      prisma.academicGroup.findMany({
         where: { isActive: true },
         orderBy: { orderIndex: "asc" },
       }),
@@ -29,6 +38,7 @@ export async function GET(req: NextRequest) {
         where: whereSubject,
         include: {
           academicClass: true,
+          academicGroup: true,
           papers: {
             where: { isActive: true },
             orderBy: { paperNumber: "asc" },
@@ -60,6 +70,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       classes,
+      groups,
       subjects,
       boards,
       universities,

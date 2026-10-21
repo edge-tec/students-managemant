@@ -42,12 +42,58 @@ export async function GET(
     // Parse breakdowns JSON safely
     let subjectBreakdown = {};
     let chapterBreakdown = {};
+    let sectionBreakdown = {};
     try {
       subjectBreakdown = JSON.parse(session.result.subjectBreakdownJson);
       chapterBreakdown = JSON.parse(session.result.chapterBreakdownJson);
+      if (session.result.sectionBreakdownJson) {
+        sectionBreakdown = JSON.parse(session.result.sectionBreakdownJson);
+      }
     } catch {
       // fallback
     }
+
+    const isReleased = session.result.isPublished;
+
+    // Mask questions and answers if results are not yet released
+    const questions = session.sessionQuestions.map((sq) => {
+      const q = sq.question;
+      if (!isReleased) {
+        return {
+          id: q.id,
+          questionTextBn: q.questionTextBn,
+          questionTextEn: q.questionTextEn,
+          marks: q.marks,
+          options: q.options.map((opt) => ({
+            id: opt.id,
+            optionKey: opt.optionKey,
+            textBn: opt.textBn,
+            textEn: opt.textEn,
+            isCorrect: false, // masked
+          })),
+          answer: null, // masked
+          subject: q.subject,
+          chapter: q.chapter,
+          references: q.references,
+        };
+      }
+      return q;
+    });
+
+    const studentAnswers = session.studentAnswers.map((sa) => {
+      if (!isReleased) {
+        return {
+          id: sa.id,
+          questionId: sa.questionId,
+          selectedOption: sa.selectedOption,
+          writtenAnswer: sa.writtenAnswer,
+          isMarkedForReview: sa.isMarkedForReview,
+          isCorrect: null, // masked
+          marksObtained: null, // masked
+        };
+      }
+      return sa;
+    });
 
     return NextResponse.json({
       session: {
@@ -59,14 +105,21 @@ export async function GET(
         negativeMark: session.negativeMark,
         serverStartTime: session.serverStartTime,
         submittedAt: session.submittedAt,
+        attemptNumber: session.attemptNumber,
       },
       result: {
         ...session.result,
-        subjectBreakdown,
-        chapterBreakdown,
+        totalScore: isReleased ? session.result.totalScore : null,
+        accuracyPct: isReleased ? session.result.accuracyPct : null,
+        rankInCohort: isReleased ? session.result.rankInCohort : null,
+        percentile: isReleased ? session.result.percentile : null,
+        subjectBreakdown: isReleased ? subjectBreakdown : {},
+        chapterBreakdown: isReleased ? chapterBreakdown : {},
+        sectionBreakdown: isReleased ? sectionBreakdown : {},
+        isReleased,
       },
-      studentAnswers: session.studentAnswers,
-      questions: session.sessionQuestions.map((sq) => sq.question),
+      studentAnswers,
+      questions,
     });
   } catch (error) {
     console.error("Fetch exam result error:", error);

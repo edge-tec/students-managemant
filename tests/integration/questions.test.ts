@@ -12,6 +12,7 @@ import {
 
 describe("Question Bank & Curriculum Integration Tests", () => {
   let adminUserId: string;
+  let reviewerUserId: string;
   let studentUserId: string;
   let testSubjectId: string;
   let testChapterId: string;
@@ -20,12 +21,25 @@ describe("Question Bank & Curriculum Integration Tests", () => {
   const testPrefix = "টেস্ট_কিউব্যাংক_";
 
   beforeAll(async () => {
-    // 1. Get seed admin and student
+    // 1. Get seed admin, reviewer, and student
     const admin = await prisma.user.findFirst({ where: { email: "admin@edubd.ac" } });
     const student = await prisma.user.findFirst({ where: { email: "student@edubd.ac" } });
     if (!admin || !student) throw new Error("Seed users missing");
     adminUserId = admin.id;
     studentUserId = student.id;
+
+    let reviewer = await prisma.user.findFirst({ where: { email: "reviewer@edubd.ac" } });
+    if (!reviewer) {
+      reviewer = await prisma.user.create({
+        data: {
+          email: "reviewer@edubd.ac",
+          fullName: "Academic Quality Reviewer",
+          passwordHash: "seed-hash",
+          isActive: true,
+        },
+      });
+    }
+    reviewerUserId = reviewer.id;
 
     // 2. Find or create a test subject and chapter
     let subject = await prisma.subject.findFirst({ where: { code: "PHY_1" } });
@@ -237,12 +251,17 @@ describe("Question Bank & Curriculum Integration Tests", () => {
     const inReview = await QuestionService.updateStatus(q.id, ContentStatus.REVIEW, adminUserId, "Submitted for staff audit");
     expect(inReview.status).toBe(ContentStatus.REVIEW);
 
-    // 3. Approve
-    const approved = await QuestionService.updateStatus(q.id, ContentStatus.APPROVED, adminUserId, "Content verified");
+    // 3. Separation of duties: Author cannot approve their own question
+    await expect(
+      QuestionService.updateStatus(q.id, ContentStatus.APPROVED, adminUserId, "Author trying to approve own question")
+    ).rejects.toThrow("Separation of duties");
+
+    // 4. Authorized independent reviewer approves
+    const approved = await QuestionService.updateStatus(q.id, ContentStatus.APPROVED, reviewerUserId, "Content verified");
     expect(approved.status).toBe(ContentStatus.APPROVED);
 
-    // 4. Publish
-    const published = await QuestionService.updateStatus(q.id, ContentStatus.PUBLISHED, adminUserId, "Live for students");
+    // 5. Publish by reviewer
+    const published = await QuestionService.updateStatus(q.id, ContentStatus.PUBLISHED, reviewerUserId, "Live for students");
     expect(published.status).toBe(ContentStatus.PUBLISHED);
 
     // Verify ContentReviews and Revisions exist in DB
@@ -360,4 +379,111 @@ describe("Question Bank & Curriculum Integration Tests", () => {
     const dbReport = await prisma.questionReport.findUnique({ where: { id: report.id } });
     expect(dbReport?.description).toContain("অপশন ৩");
   });
+
+  it("should list question reports with status and reason filters and pagination", async () => {
+    const q = await prisma.question.findFirst({
+      where: { questionTextBn: { contains: testPrefix } },
+    });
+    expect(q).toBeDefined();
+
+    // Create a typo report as well
+    await QuestionService.reportQuestion(q!.id, studentUserId, {
+      reason: ReportReason.TYPO_OR_GRAMMAR,
+      description: "প্রশ্নের বানানে ভুল রয়েছে।",
+    });
+
+    // 1. List all pending reports
+    const pendingList = await QuestionService.listQuestionReports({
+      status: ReportStatus.PENDING,
+      page: 1,
+      limit: 10,
+    });
+
+    expect(pendingList.reports.length).toBeGreaterThanOrEqual(2);
+    expect(pendingList.pagination.pendingCount).toBeGreaterThanOrEqual(2);
+    expect(pendingList.reports.some((r) => r.reason === ReportReason.WRONG_ANSWER)).toBe(true);
+    expect(pendingList.reports.some((r) => r.reason === ReportReason.TYPO_OR_GRAMMAR)).toBe(true);
+
+    // 2. Filter by specific reason
+    const typoList = await QuestionService.listQuestionReports({
+      reason: ReportReason.TYPO_OR_GRAMMAR,
+      page: 1,
+      limit: 10,
+    });
+
+    expect(typoList.reports.every((r) => r.reason === ReportReason.TYPO_OR_GRAMMAR)).toBe(true);
+
+    // 3. Search filter
+    const searchList = await QuestionService.listQuestionReports({
+      search: "বানানে ভুল",
+    });
+    expect(searchList.reports.length).toBeGreaterThanOrEqual(1);
+    expect(searchList.reports[0].description).toContain("বানানে ভুল");
+  });
+
+  it("should allow content reviewer or admin to resolve a question report with notes and audit trail", async () => {
+    const q = await prisma.question.findFirst({
+      where: { questionTextBn: { contains: testPrefix } },
+    });
+    expect(q).toBeDefined();
+
+    const report = await QuestionService.reportQuestion(q!.id, studentUserId, {
+      reason: ReportReason.WRONG_ANSWER,
+      description: "উত্তর অপশন B হওয়া উচিত।",
+    });
+
+    // Resolve the report
+    const resolved = await QuestionService.resolveQuestionReport(
+      report.id,
+      ReportStatus.RESOLVED,
+      "সংশোধন করা হয়েছে: অপশন B কে সঠিক উত্তর হিসেবে চিহ্নিত করা হলো।",
+      reviewerUserId,
+      "127.0.0.1"
+    );
+
+    expect(resolved.status).toBe(ReportStatus.RESOLVED);
+    expect(resolved.adminNotes).toContain("সংশোধন করা হয়েছে");
+
+    // Verify DB update
+    const dbReport = await prisma.questionReport.findUnique({ where: { id: report.id } });
+    expect(dbReport?.status).toBe(ReportStatus.RESOLVED);
+    expect(dbReport?.adminNotes).toContain("অপশন B কে সঠিক উত্তর");
+
+    // Verify audit log
+    const auditLog = await prisma.auditLog.findFirst({
+      where: {
+        resource: "QuestionReport",
+        resourceId: report.id,
+        action: "QUESTION_REPORT_RESOLVED",
+      },
+    });
+    expect(auditLog).toBeDefined();
+    expect(auditLog?.userId).toBe(reviewerUserId);
+  });
+
+  it("should allow dismissing a question report with notes", async () => {
+    const q = await prisma.question.findFirst({
+      where: { questionTextBn: { contains: testPrefix } },
+    });
+    expect(q).toBeDefined();
+
+    const report = await QuestionService.reportQuestion(q!.id, studentUserId, {
+      reason: ReportReason.OUT_OF_SYLLABUS,
+      description: "এই অধ্যায়টি সিলেবাসে নেই।",
+    });
+
+    const dismissed = await QuestionService.resolveQuestionReport(
+      report.id,
+      ReportStatus.DISMISSED,
+      "যাচাই করা হয়েছে: এটি ২০২৪ সালের বোর্ড সিলেবাসে অন্তর্ভুক্ত।",
+      adminUserId
+    );
+
+    expect(dismissed.status).toBe(ReportStatus.DISMISSED);
+    expect(dismissed.adminNotes).toContain("বোর্ড সিলেবাসে অন্তর্ভুক্ত");
+
+    const dbReport = await prisma.questionReport.findUnique({ where: { id: report.id } });
+    expect(dbReport?.status).toBe(ReportStatus.DISMISSED);
+  });
 });
+

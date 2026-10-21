@@ -10,7 +10,8 @@
     "test": "vitest run",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "prisma:seed": "node scripts/seed.mjs"
+    "prisma:seed": "node scripts/seed.mjs",
+    "provision-admin": "node scripts/provision-admin.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^6.0.0",
@@ -21,12 +22,15 @@
     "katex": "^0.19.0",
     "lucide-react": "^1.60.0",
     "next": "16.4.2",
+    "nodemailer": "^10.1.7",
     "papaparse": "^5.7.0",
+    "pdf-parse": "^2.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-hook-form": "^7.90.0",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.7.0",
+    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5",
     "zod": "^4.6.7"
   },
@@ -37,6 +41,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/katex": "^0.16.8",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.2",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",

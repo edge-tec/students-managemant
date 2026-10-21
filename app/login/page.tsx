@@ -80,7 +80,15 @@ function LoginContent() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700">{t.auth.passwordLabel}</label>
+            <div className="flex justify-between items-center">
+              <label className="block text-xs font-bold text-slate-700">{t.auth.passwordLabel}</label>
+              <Link
+                href="/reset-password"
+                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold transition"
+              >
+                {locale === "bn" ? "পাসওয়ার্ড ভুলে গেছেন?" : "Forgot password?"}
+              </Link>
+            </div>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
               <input

@@ -10,6 +10,13 @@ import {
   Archive,
   History,
   AlertCircle,
+  Flag,
+  Check,
+  X,
+  RefreshCw,
+  Clock,
+  User,
+  MessageSquare,
 } from "lucide-react";
 import { MathText } from "@/components/ui/MathText";
 
@@ -53,6 +60,103 @@ interface QuestionAdminItem {
   _count?: { bookmarks: number; reports: number };
 }
 
+interface QuestionReportItem {
+  id: string;
+  questionId: string;
+  reason: "WRONG_ANSWER" | "TYPO_OR_GRAMMAR" | "INCOMPLETE_QUESTION" | "IMAGE_OR_FORMULA_BROKEN" | "OUT_OF_SYLLABUS" | "OTHER";
+  description: string | null;
+  status: "PENDING" | "REVIEWED" | "RESOLVED" | "DISMISSED";
+  adminNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user?: {
+    id: string;
+    fullName: string;
+    email: string;
+    phoneNumber?: string | null;
+  } | null;
+  question: {
+    id: string;
+    category: string;
+    type: "MCQ" | "CQ" | "SHORT";
+    difficulty: string;
+    status: string;
+    isPremium: boolean;
+    marks: number;
+    negativeMarks: number;
+    questionTextBn: string;
+    questionTextEn?: string | null;
+    stemBn?: string | null;
+    subject: { id: string; nameBn: string; nameEn?: string; code: string };
+    chapter: { id: string; nameBn: string; chapterNum: number };
+    options?: { optionKey: string; textBn: string; textEn?: string | null; isCorrect: boolean }[];
+    answer?: { correctKey: string; explanationBn: string; explanationEn?: string | null } | null;
+    subparts?: { partLabel: string; questionTextBn: string; marks: number; solutionBn: string }[];
+  };
+}
+
+const REPORT_REASONS: Record<
+  string,
+  { bn: string; en: string; badgeClass: string }
+> = {
+  WRONG_ANSWER: {
+    bn: "ভুল উত্তর",
+    en: "Wrong Answer",
+    badgeClass: "bg-rose-50 text-rose-700 border-rose-200",
+  },
+  TYPO_OR_GRAMMAR: {
+    bn: "টাইপো / ব্যাকরণগত ভুল",
+    en: "Typo or Grammar",
+    badgeClass: "bg-amber-50 text-amber-700 border-amber-200",
+  },
+  INCOMPLETE_QUESTION: {
+    bn: "অসম্পূর্ণ প্রশ্ন",
+    en: "Incomplete Question",
+    badgeClass: "bg-orange-50 text-orange-700 border-orange-200",
+  },
+  IMAGE_OR_FORMULA_BROKEN: {
+    bn: "চিত্র বা সূত্র অস্পষ্ট / নষ্ট",
+    en: "Broken Image or Formula",
+    badgeClass: "bg-purple-50 text-purple-700 border-purple-200",
+  },
+  OUT_OF_SYLLABUS: {
+    bn: "সিলেবাস বহির্ভূত",
+    en: "Out of Syllabus",
+    badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  },
+  OTHER: {
+    bn: "অন্যান্য সমস্যা",
+    en: "Other Issue",
+    badgeClass: "bg-slate-50 text-slate-700 border-slate-200",
+  },
+};
+
+const REPORT_STATUS_BADGES: Record<
+  string,
+  { bn: string; en: string; className: string }
+> = {
+  PENDING: {
+    bn: "অমীমাংসিত",
+    en: "PENDING",
+    className: "bg-amber-100 text-amber-800 border-amber-200",
+  },
+  REVIEWED: {
+    bn: "পর্যালোচিত",
+    en: "REVIEWED",
+    className: "bg-blue-100 text-blue-800 border-blue-200",
+  },
+  RESOLVED: {
+    bn: "সমাধানকৃত",
+    en: "RESOLVED",
+    className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  },
+  DISMISSED: {
+    bn: "বাতিলকৃত",
+    en: "DISMISSED",
+    className: "bg-slate-100 text-slate-700 border-slate-200",
+  },
+};
+
 export function QuestionManager() {
   const [questions, setQuestions] = useState<QuestionAdminItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,7 +164,28 @@ export function QuestionManager() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Filters
+  // Sub-Tab State
+  const [activeSubTab, setActiveSubTab] = useState<"questions" | "reports">("questions");
+
+  // Reports State
+  const [reports, setReports] = useState<QuestionReportItem[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportTotalCount, setReportTotalCount] = useState(0);
+  const [reportTotalPages, setReportTotalPages] = useState(1);
+  const [reportPage, setReportPage] = useState(1);
+  const [pendingReportsCount, setPendingReportsCount] = useState(0);
+
+  // Report Filters
+  const [reportStatusFilter, setReportStatusFilter] = useState("");
+  const [reportReasonFilter, setReportReasonFilter] = useState("");
+  const [reportSearch, setReportSearch] = useState("");
+
+  // Report Resolution Modal State
+  const [selectedReport, setSelectedReport] = useState<QuestionReportItem | null>(null);
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [resolvingReport, setResolvingReport] = useState(false);
+
+  // Question Filters
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
   const [type, setType] = useState("");
@@ -151,9 +276,66 @@ export function QuestionManager() {
     }
   }, [category, status, type, search, page]);
 
+  const loadReports = useCallback(async () => {
+    setReportsLoading(true);
+    const params = new URLSearchParams();
+    if (reportStatusFilter) params.set("status", reportStatusFilter);
+    if (reportReasonFilter) params.set("reason", reportReasonFilter);
+    if (reportSearch.trim()) params.set("search", reportSearch.trim());
+    params.set("page", String(reportPage));
+    params.set("limit", "15");
+
+    try {
+      const res = await fetch(`/api/v1/admin/questions/reports?${params.toString()}`);
+      const data = await res.json();
+      setReports(data.reports || []);
+      setReportTotalCount(data.pagination?.totalCount || 0);
+      setReportTotalPages(data.pagination?.totalPages || 1);
+      setPendingReportsCount(data.pagination?.pendingCount || 0);
+    } catch (err) {
+      console.error("Failed to load question reports:", err);
+    } finally {
+      setReportsLoading(false);
+    }
+  }, [reportStatusFilter, reportReasonFilter, reportSearch, reportPage]);
+
   useEffect(() => {
     loadQuestions();
   }, [loadQuestions]);
+
+  useEffect(() => {
+    loadReports();
+  }, [loadReports]);
+
+  const handleResolveReport = async (reportId: string, newStatus: string, notes?: string) => {
+    setResolvingReport(true);
+    try {
+      const res = await fetch("/api/v1/admin/questions/reports", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportId,
+          status: newStatus,
+          adminNotes: notes || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertMsg({ type: "error", text: data.error || "রিপোর্ট আপডেট ব্যর্থ হয়েছে।" });
+      } else {
+        setAlertMsg({
+          type: "success",
+          text: `রিপোর্ট স্ট্যাটাস সফলভাবে '${newStatus}' এ পরিবর্তন করা হয়েছে।`,
+        });
+        setSelectedReport(null);
+        loadReports();
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: "error", text: err.message });
+    } finally {
+      setResolvingReport(false);
+    }
+  };
 
   const handleStatusChange = async (questionId: string, newStatus: string, comments?: string) => {
     try {
@@ -316,8 +498,53 @@ export function QuestionManager() {
         </div>
       )}
 
-      {/* Filter and Search Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+      {/* Sub-Tabs: Question Bank vs Reported Questions */}
+      <div className="flex items-center gap-2 border-b border-slate-200">
+        <button
+          onClick={() => setActiveSubTab("questions")}
+          className={`pb-3 px-3 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 transition ${
+            activeSubTab === "questions"
+              ? "border-emerald-600 text-emerald-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <FileQuestion className="w-4 h-4" />
+          <span>প্রশ্ন ব্যাংক তালিকা (Question Bank)</span>
+          <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-700 font-medium">
+            {totalCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveSubTab("reports");
+            loadReports();
+          }}
+          className={`pb-3 px-3 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 transition ${
+            activeSubTab === "reports"
+              ? "border-emerald-600 text-emerald-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <Flag className="w-4 h-4" />
+          <span>রিপোর্টকৃত প্রশ্নাবলি (Reported Questions)</span>
+          {pendingReportsCount > 0 ? (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-white animate-pulse">
+              {pendingReportsCount} অমীমাংসিত
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600 font-medium">
+              {reportTotalCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* SUB-TAB 1: QUESTION BANK LISTING */}
+      {activeSubTab === "questions" && (
+        <>
+          {/* Filter and Search Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
         {/* Search */}
         <div className="relative lg:col-span-2">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -555,6 +782,235 @@ export function QuestionManager() {
           </div>
         </div>
       )}
+    </>
+  )}
+
+  {/* SUB-TAB 2: REPORTED QUESTIONS LISTING */}
+  {activeSubTab === "reports" && (
+    <div className="space-y-4">
+      {/* Reported Questions Filter Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+        {/* Search */}
+        <div className="relative lg:col-span-2">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={reportSearch}
+            onChange={(e) => {
+              setReportSearch(e.target.value);
+              setReportPage(1);
+            }}
+            placeholder="প্রশ্ন, বিবরণ, বা শিক্ষার্থীর ইমেইল অনুসন্ধান..."
+            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-emerald-600 text-xs"
+          />
+        </div>
+
+        {/* Reason Filter */}
+        <select
+          value={reportReasonFilter}
+          onChange={(e) => {
+            setReportReasonFilter(e.target.value);
+            setReportPage(1);
+          }}
+          className="p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600 text-xs"
+        >
+          <option value="">সকল কারণ (All Reasons)</option>
+          <option value="WRONG_ANSWER">ভুল উত্তর (Wrong Answer)</option>
+          <option value="TYPO_OR_GRAMMAR">টাইপো / বানান ভুল (Typo)</option>
+          <option value="INCOMPLETE_QUESTION">অসম্পূর্ণ প্রশ্ন (Incomplete)</option>
+          <option value="IMAGE_OR_FORMULA_BROKEN">চিত্র / সূত্র নষ্ট (Media/Formula)</option>
+          <option value="OUT_OF_SYLLABUS">সিলেবাস বহির্ভূত (Out of Syllabus)</option>
+          <option value="OTHER">অন্যান্য সমস্যা (Other)</option>
+        </select>
+
+        {/* Status Filter */}
+        <select
+          value={reportStatusFilter}
+          onChange={(e) => {
+            setReportStatusFilter(e.target.value);
+            setReportPage(1);
+          }}
+          className="p-2 border border-slate-300 rounded-lg bg-white text-slate-700 outline-none focus:border-emerald-600 text-xs"
+        >
+          <option value="">সকল স্ট্যাটাস (All Status)</option>
+          <option value="PENDING">অমীমাংসিত (PENDING)</option>
+          <option value="REVIEWED">পর্যালোচিত (REVIEWED)</option>
+          <option value="RESOLVED">সমাধানকৃত (RESOLVED)</option>
+          <option value="DISMISSED">বাতিলকৃত (DISMISSED)</option>
+        </select>
+
+        {/* Refresh Button */}
+        <button
+          onClick={() => loadReports()}
+          disabled={reportsLoading}
+          className="p-2 border border-slate-300 rounded-lg bg-white text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1.5 font-medium transition disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${reportsLoading ? "animate-spin" : ""}`} />
+          <span>রিফ্রেশ</span>
+        </button>
+      </div>
+
+      {/* Reported Questions Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs border border-slate-200 rounded-xl overflow-hidden">
+          <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+            <tr>
+              <th className="p-3">প্রশ্ন / উদ্দীপক</th>
+              <th className="p-3">রিপোর্টের কারণ</th>
+              <th className="p-3">শিক্ষার্থীর বিবরণ</th>
+              <th className="p-3">রিপোর্টকারী ও তারিখ</th>
+              <th className="p-3">অবস্থা ও নোট</th>
+              <th className="p-3 text-right">পদক্ষেপ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 text-slate-800">
+            {reportsLoading ? (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-slate-500">
+                  রিপোর্টকৃত প্রশ্নাবলি লোড হচ্ছে...
+                </td>
+              </tr>
+            ) : reports.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-slate-500">
+                  কোনো রিপোর্ট পাওয়া যায়নি।
+                </td>
+              </tr>
+            ) : (
+              reports.map((r) => (
+                <tr key={r.id} className="hover:bg-slate-50/60">
+                  {/* Question Column */}
+                  <td className="p-3 max-w-xs">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="font-semibold text-emerald-800 text-[11px]">
+                        {r.question?.subject?.nameBn}
+                      </span>
+                      <span className="text-slate-400 text-[10px]">•</span>
+                      <span className="text-slate-500 text-[11px]">
+                        অধ্যায় {r.question?.chapter?.chapterNum}
+                      </span>
+                      <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold ml-1">
+                        {r.question?.type}
+                      </span>
+                    </div>
+                    <p className="font-medium text-slate-900 line-clamp-2">
+                      <MathText
+                        text={
+                          r.question?.type === "CQ"
+                            ? r.question?.stemBn || r.question?.questionTextBn
+                            : r.question?.questionTextBn
+                        }
+                      />
+                    </p>
+                  </td>
+
+                  {/* Reason Column */}
+                  <td className="p-3 whitespace-nowrap">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                        REPORT_REASONS[r.reason]?.badgeClass || "bg-slate-50 text-slate-700"
+                      }`}
+                    >
+                      {REPORT_REASONS[r.reason]?.bn || r.reason}
+                    </span>
+                  </td>
+
+                  {/* Description Column */}
+                  <td className="p-3 max-w-xs">
+                    {r.description ? (
+                      <p className="text-slate-700 italic line-clamp-2">"{r.description}"</p>
+                    ) : (
+                      <span className="text-slate-400 italic">কোনো বিবরণ নেই</span>
+                    )}
+                  </td>
+
+                  {/* Reporter & Date Column */}
+                  <td className="p-3 whitespace-nowrap">
+                    <span className="font-medium text-slate-900 block">
+                      {r.user?.fullName || "বেনামী শিক্ষার্থী"}
+                    </span>
+                    <span className="text-[11px] text-slate-500 block">
+                      {r.user?.email || "-"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block">
+                      {new Date(r.createdAt).toLocaleDateString("bn-BD", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </span>
+                  </td>
+
+                  {/* Status & Notes Column */}
+                  <td className="p-3">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-bold border inline-block ${
+                        REPORT_STATUS_BADGES[r.status]?.className || "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {REPORT_STATUS_BADGES[r.status]?.bn || r.status}
+                    </span>
+                    {r.adminNotes && (
+                      <p className="text-[10px] text-slate-500 line-clamp-1 mt-1 font-medium">
+                        নোট: {r.adminNotes}
+                      </p>
+                    )}
+                  </td>
+
+                  {/* Actions Column */}
+                  <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                    <button
+                      onClick={() => {
+                        setSelectedReport(r);
+                        setResolutionNotes(r.adminNotes || "");
+                      }}
+                      className="px-2.5 py-1 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-[11px] font-semibold transition"
+                      title="রিপোর্ট পর্যালোচনা ও সমাধান"
+                    >
+                      পর্যালোচনা
+                    </button>
+
+                    <button
+                      onClick={() => setPreviewQuestion(r.question as any)}
+                      className="p-1 rounded text-slate-500 hover:text-emerald-700 hover:bg-slate-100 inline-block align-middle"
+                      title="প্রশ্ন প্রিভিউ"
+                    >
+                      <Eye className="w-4 h-4 inline" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Reports Pagination */}
+      {reportTotalPages > 1 && (
+        <div className="flex justify-between items-center text-xs text-slate-600 pt-2">
+          <span>
+            মোট {reportTotalCount} টি রিপোর্ট (পৃষ্ঠা {reportPage} / {reportTotalPages})
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setReportPage((p) => Math.max(1, p - 1))}
+              disabled={reportPage === 1}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg disabled:opacity-40"
+            >
+              পূর্ববর্তী
+            </button>
+            <button
+              onClick={() => setReportPage((p) => Math.min(reportTotalPages, p + 1))}
+              disabled={reportPage === reportTotalPages}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg disabled:opacity-40"
+            >
+              পরবর্তী
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )}
 
       {/* CREATE QUESTION MODAL */}
       {showCreateModal && (
@@ -993,6 +1449,227 @@ export function QuestionManager() {
                 ) : (
                   <p className="text-slate-400">কোনো রিভিউ হিস্ট্রি নেই।</p>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT REVIEW & RESOLUTION MODAL */}
+      {selectedReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Flag className="w-5 h-5 text-amber-600" />
+                <h3 className="font-bold text-slate-900 text-base">
+                  প্রশ্ন রিপোর্ট পর্যালোচনা ও সমাধান
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedReport(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Status & Reason Summary */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-medium">বর্তমান অবস্থা:</span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full font-bold border ${
+                    REPORT_STATUS_BADGES[selectedReport.status]?.className || "bg-slate-100"
+                  }`}
+                >
+                  {REPORT_STATUS_BADGES[selectedReport.status]?.bn || selectedReport.status}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-medium">রিপোর্টের কারণ:</span>
+                <span
+                  className={`px-2.5 py-0.5 rounded font-semibold border ${
+                    REPORT_REASONS[selectedReport.reason]?.badgeClass || "bg-slate-100"
+                  }`}
+                >
+                  {REPORT_REASONS[selectedReport.reason]?.bn} ({REPORT_REASONS[selectedReport.reason]?.en})
+                </span>
+              </div>
+            </div>
+
+            {/* Question Details Card */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">
+                    {selectedReport.question?.subject?.nameBn}
+                  </span>
+                  <span className="text-slate-600 font-medium">
+                    অধ্যায় {selectedReport.question?.chapter?.chapterNum}: {selectedReport.question?.chapter?.nameBn}
+                  </span>
+                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 font-bold rounded border border-blue-200">
+                    {selectedReport.question?.type}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewQuestion(selectedReport.question as any)}
+                  className="text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 hover:underline"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>সম্পূর্ণ প্রিভিউ</span>
+                </button>
+              </div>
+
+              {selectedReport.question?.type === "CQ" && selectedReport.question?.stemBn && (
+                <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-slate-800 font-medium whitespace-pre-line">
+                  <span className="font-bold text-amber-900 block mb-0.5">উদ্দীপক:</span>
+                  <MathText text={selectedReport.question.stemBn} />
+                </div>
+              )}
+
+              <div className="text-sm font-semibold text-slate-900">
+                <MathText text={selectedReport.question?.questionTextBn || ""} />
+              </div>
+
+              {/* Options if MCQ */}
+              {selectedReport.question?.options && selectedReport.question.options.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {selectedReport.question.options.map((opt) => (
+                    <div
+                      key={opt.optionKey}
+                      className={`p-2.5 rounded-lg border flex items-center gap-2 ${
+                        opt.isCorrect
+                          ? "border-emerald-500 bg-emerald-50/90 text-emerald-900 font-bold"
+                          : "border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] bg-slate-200 text-slate-800 shrink-0">
+                        {opt.optionKey}
+                      </span>
+                      <MathText text={opt.textBn} />
+                      {opt.isCorrect && (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 ml-auto shrink-0" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CQ Subparts if CQ */}
+              {selectedReport.question?.subparts && selectedReport.question.subparts.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  {selectedReport.question.subparts.map((sp) => (
+                    <div key={sp.partLabel} className="p-2 rounded bg-white border border-slate-200 space-y-0.5">
+                      <div className="font-semibold text-slate-900">
+                        ({sp.partLabel}) [{sp.marks} নম্বর]: <MathText text={sp.questionTextBn} />
+                      </div>
+                      <div className="text-slate-600 text-[11px]">
+                        <strong>সমাধান: </strong>
+                        <MathText text={sp.solutionBn} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Answer & Explanation */}
+              {selectedReport.question?.answer && (
+                <div className="p-2.5 bg-emerald-50/50 rounded-lg border border-emerald-100 text-xs space-y-1">
+                  <span className="font-bold text-emerald-800">
+                    সঠিক উত্তর: অপশন {selectedReport.question.answer.correctKey}
+                  </span>
+                  <p className="text-slate-700 leading-relaxed whitespace-pre-line">
+                    <MathText text={selectedReport.question.answer.explanationBn} />
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Student Report Details Card */}
+            <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 space-y-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/60 pb-2">
+                <div className="flex items-center gap-1.5 text-slate-800 font-medium">
+                  <User className="w-3.5 h-3.5 text-amber-700" />
+                  <span>রিপোর্টকারী: </span>
+                  <strong className="text-slate-900">{selectedReport.user?.fullName || "বেনামী শিক্ষার্থী"}</strong>
+                  {selectedReport.user?.email && (
+                    <span className="text-slate-500">({selectedReport.user.email})</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 text-slate-500 text-[11px]">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{new Date(selectedReport.createdAt).toLocaleString("bn-BD")}</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="font-bold text-amber-900 block mb-1">শিক্ষার্থীর সমস্যা বিবরণী:</span>
+                <p className="p-2.5 bg-white rounded-lg border border-amber-200 text-slate-800 leading-relaxed italic">
+                  {selectedReport.description || "কোনো অতিরিক্ত বিবরণ প্রদান করা হয়নি।"}
+                </p>
+              </div>
+            </div>
+
+            {/* Reviewer Resolution Form */}
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  প্রশাসনিক সমাধান নোট / পর্যালোচকের মন্তব্য:
+                </label>
+                <textarea
+                  rows={3}
+                  value={resolutionNotes}
+                  onChange={(e) => setResolutionNotes(e.target.value)}
+                  placeholder="যেমন: অপশন ও ব্যাখ্যা যাচাই করে সংশোধন করা হয়েছে / প্রশ্ন ও সঠিক উত্তর নির্ভুল রয়েছে।"
+                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedReport(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 text-xs font-semibold transition"
+                >
+                  বন্ধ করুন
+                </button>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={resolvingReport}
+                    onClick={() => handleResolveReport(selectedReport.id, "REVIEWED", resolutionNotes)}
+                    className="px-3.5 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>পর্যালোচনাধীন রাখুন</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={resolvingReport}
+                    onClick={() => handleResolveReport(selectedReport.id, "DISMISSED", resolutionNotes)}
+                    className="px-3.5 py-2 bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>রিপোর্ট বাতিল (Dismiss)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={resolvingReport}
+                    onClick={() => handleResolveReport(selectedReport.id, "RESOLVED", resolutionNotes)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{resolvingReport ? "সংরক্ষণ হচ্ছে..." : "সমাধান সম্পন্ন (Resolve)"}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -5,7 +5,26 @@ import { QuestionImportEngine, QuestionImportRow } from "@/lib/imports/importEng
 describe("Bulk Question Import Engine Tests", () => {
   let adminUserId: string;
 
+  async function cleanupTestQuestions() {
+    const testQs = await prisma.question.findMany({
+      where: { questionTextBn: { contains: "টেস্ট ইম্পোর্ট প্রশ্ন" } },
+      select: { id: true },
+    });
+    const ids = testQs.map((q) => q.id);
+    if (ids.length > 0) {
+      await prisma.studentAnswer.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.examSessionQuestion.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.examQuestion.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.questionAnswer.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.questionOption.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.questionRevision.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.contentReview.deleteMany({ where: { questionId: { in: ids } } });
+      await prisma.question.deleteMany({ where: { id: { in: ids } } });
+    }
+  }
+
   beforeAll(async () => {
+    await cleanupTestQuestions();
     const admin = await prisma.user.findFirst({
       where: { email: "admin@edubd.ac" },
     });
@@ -14,10 +33,7 @@ describe("Bulk Question Import Engine Tests", () => {
   });
 
   afterAll(async () => {
-    // Cleanup any imported test question
-    await prisma.question.deleteMany({
-      where: { questionTextBn: { contains: "টেস্ট ইম্পোর্ট প্রশ্ন" } },
-    });
+    await cleanupTestQuestions();
   });
 
   it("should generate a valid CSV template containing standard Bengali question headers", () => {

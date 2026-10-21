@@ -25,6 +25,13 @@ enum UserRoleType {
   SUPER_ADMIN
 }
 
+enum EnrollmentStatus {
+  ACTIVE
+  TRANSFERRED
+  COMPLETED
+  DROPPED
+}
+
 enum ExamCategoryType {
   SSC
   HSC
@@ -65,6 +72,45 @@ enum ExamSessionStatus {
   SUBMITTED
   EXPIRED
   EVALUATED
+}
+
+enum ExamType {
+  PRACTICE
+  CHAPTER_TEST
+  SUBJECT_TEST
+  MODEL_TEST
+  FULL_SYLLABUS
+  ADMISSION_TEST
+  MEDICAL_ADMISSION
+  UNIVERSITY_ADMISSION
+  CUSTOM
+}
+
+enum ExamStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  SCHEDULED
+  ARCHIVED
+}
+
+enum ExamAccessType {
+  FREE
+  SUBSCRIPTION_ONLY
+  PAID
+}
+
+enum ResultReleasePolicy {
+  IMMEDIATE
+  AFTER_EXAM_WINDOW
+  MANUAL
+}
+
+enum FinalizationReason {
+  STUDENT_SUBMIT
+  TIMEOUT_AUTO_SUBMIT
+  ADMIN_RESOLVED
+  ABANDONED
 }
 
 enum PaymentStatus {
@@ -167,6 +213,17 @@ model User {
   assignedReviews ContentReview[] @relation("ReviewerAssigned")
   createdQuestions Question[]  @relation("QuestionAuthor")
   questionReports QuestionReport[]
+  createdExams    Exam[]       @relation("ExamAuthor")
+  manualGradesGiven ManualGrade[] @relation("GraderUser")
+  manualGradesReviewed ManualGrade[] @relation("GraderReviewer")
+  examAuditEvents ExamAuditEvent[] @relation("AuditUser")
+  teacherAssignments TeacherAssignment[] @relation("TeacherAssignments")
+  assignedTeachers   TeacherAssignment[] @relation("TeacherAssigner")
+  classEnrollments   ClassEnrollment[]   @relation("StudentClassEnrollments")
+  pdfImports         PdfImport[]         @relation("UserPdfImports")
+  textEdits          DocumentTextVersion[] @relation("UserTextEdits")
+  questionGenJobs    QuestionGenerationJob[] @relation("UserQuestionGenJobs")
+  questionReviewEvents QuestionReviewEvent[] @relation("UserQuestionReviewEvents")
 
   @@index([email])
   @@index([phoneNumber])
@@ -241,6 +298,21 @@ model AcademicClass {
   orderIndex  Int           @default(0)
   isActive    Boolean       @default(true)
   subjects    Subject[]
+  exams       Exam[]
+  teacherAssignments TeacherAssignment[]
+  classEnrollments   ClassEnrollment[]
+  pdfImports         PdfImport[]
+  createdAt   DateTime      @default(now())
+}
+
+model AcademicGroup {
+  id          String        @id @default(uuid())
+  code        String        @unique // e.g. "SCIENCE", "COMMERCE", "HUMANITIES", "GENERAL", "VOCATIONAL"
+  nameEn      String
+  nameBn      String
+  orderIndex  Int           @default(0)
+  isActive    Boolean       @default(true)
+  subjects    Subject[]
   createdAt   DateTime      @default(now())
 }
 
@@ -251,6 +323,7 @@ model ExaminationBoard {
   nameBn      String
   isActive    Boolean       @default(true)
   questions   QuestionReference[]
+  exams       Exam[]
 }
 
 model University {
@@ -284,6 +357,8 @@ model Subject {
   category    ExamCategoryType
   classId     String?
   academicClass AcademicClass? @relation(fields: [classId], references: [id])
+  groupId     String?
+  academicGroup AcademicGroup? @relation(fields: [groupId], references: [id])
   papers      Paper[]
   books       Book[]
   chapters    Chapter[]
@@ -291,10 +366,16 @@ model Subject {
   courses     Course[]
   libraryResources LibraryResource[]
   doubtTickets DoubtTicket[]
+  exams       Exam[]
+  teacherAssignments TeacherAssignment[]
+  pdfImports         PdfImport[]
+  draftQuestions     GeneratedQuestionDraft[]
   orderIndex  Int            @default(0)
   isActive    Boolean        @default(true)
 
   @@index([category])
+  @@index([classId])
+  @@index([groupId])
 }
 
 model Paper {
@@ -306,6 +387,7 @@ model Paper {
   nameBn      String         // "১ম পত্র" / "২য় পত্র"
   chapters    Chapter[]
   questions   Question[]
+  exams       Exam[]
   isActive    Boolean        @default(true)
 
   @@unique([subjectId, paperNumber])
@@ -336,6 +418,9 @@ model Chapter {
   questions   Question[]
   lessons     Lesson[]
   libraryResources LibraryResource[]
+  exams       Exam[]
+  pdfImports  PdfImport[]
+  draftQuestions GeneratedQuestionDraft[]
   orderIndex  Int            @default(0)
   isActive    Boolean        @default(true)
 
@@ -395,6 +480,9 @@ model Question {
 
   authorId          String?
   author            User?             @relation("QuestionAuthor", fields: [authorId], references: [id])
+  pdfImportId       String?
+  pdfImport         PdfImport?        @relation(fields: [pdfImportId], references: [id], onDelete: SetNull)
+  sourceDraft       GeneratedQuestionDraft?
 
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
@@ -409,6 +497,7 @@ model Question {
   reviews           ContentReview[]
   reports           QuestionReport[]
   sessionQuestions  ExamSessionQuestion[]
+  examQuestions     ExamQuestion[]
   studentAnswers    StudentAnswer[]
   wrongQuestionEntries WrongQuestion[]
   bookmarks         Bookmark[]
@@ -559,35 +648,138 @@ model ExamTemplate {
   createdAt        DateTime         @default(now())
 }
 
+model Exam {
+  id                  String              @id @default(uuid())
+  titleBn             String
+  titleEn             String
+  descriptionBn       String?
+  descriptionEn       String?
+  category            ExamCategoryType
+  examType            ExamType            @default(MODEL_TEST)
+  
+  academicClassId     String?
+  academicClass       AcademicClass?      @relation(fields: [academicClassId], references: [id])
+  subjectId           String?
+  subject             Subject?            @relation(fields: [subjectId], references: [id])
+  paperId             String?
+  paper               Paper?              @relation(fields: [paperId], references: [id])
+  chapterId           String?
+  chapter             Chapter?            @relation(fields: [chapterId], references: [id])
+  boardId             String?
+  board               ExaminationBoard?   @relation(fields: [boardId], references: [id])
+  examYear            Int?
+  
+  durationMinutes     Int
+  totalMarks          Float
+  passMarks           Float?
+  negativeMarks       Float               @default(0.25)
+  questionCount       Int
+  
+  randomizeQuestions  Boolean             @default(true)
+  randomizeOptions    Boolean             @default(true)
+  
+  startDate           DateTime?
+  endDate             DateTime?
+  maxAttempts         Int?                @default(1)
+  
+  status              ExamStatus          @default(DRAFT)
+  accessType          ExamAccessType      @default(FREE)
+  priceBdt            Float?
+  
+  releasePolicy       ResultReleasePolicy @default(IMMEDIATE)
+  isResultsReleased   Boolean             @default(true)
+  version             Int                 @default(1)
+  
+  instructionsBn      String?
+  instructionsEn      String?
+  allowedResources    String?
+  
+  authorId            String?
+  author              User?               @relation("ExamAuthor", fields: [authorId], references: [id])
+  
+  sections            ExamSection[]
+  examQuestions       ExamQuestion[]
+  sessions            ExamSession[]
+  auditEvents         ExamAuditEvent[]
+  
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([category, status])
+  @@index([subjectId, status])
+}
+
+model ExamSection {
+  id              String         @id @default(uuid())
+  examId          String
+  exam            Exam           @relation(fields: [examId], references: [id], onDelete: Cascade)
+  titleBn         String
+  titleEn         String
+  descriptionBn   String?
+  descriptionEn   String?
+  durationMinutes Int?
+  totalMarks      Float?
+  orderIndex      Int            @default(1)
+  
+  questions       ExamQuestion[]
+  createdAt       DateTime       @default(now())
+
+  @@index([examId, orderIndex])
+}
+
+model ExamQuestion {
+  id            String       @id @default(uuid())
+  examId        String
+  exam          Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  sectionId     String?
+  section       ExamSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  questionId    String
+  question      Question     @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  orderIndex    Int
+  marks         Float        @default(1.0)
+  negativeMarks Float        @default(0.25)
+
+  @@unique([examId, questionId])
+  @@index([examId, orderIndex])
+}
+
 model ExamSession {
-  id               String               @id @default(uuid())
-  studentId        String
-  student          User                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  templateId       String?
-  template         ExamTemplate?        @relation(fields: [templateId], references: [id])
-  category         ExamCategoryType
-  mode             ExamMode             @default(REAL_EXAM)
-  status           ExamSessionStatus    @default(CREATED)
+  id                 String               @id @default(uuid())
+  studentId          String
+  student            User                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  examId             String?
+  exam               Exam?                @relation(fields: [examId], references: [id])
+  templateId         String?
+  template           ExamTemplate?        @relation(fields: [templateId], references: [id])
+  
+  category           ExamCategoryType
+  mode               ExamMode             @default(REAL_EXAM)
+  status             ExamSessionStatus    @default(CREATED)
   
   // Server-authoritative timing
-  durationMinutes  Int
-  serverStartTime  DateTime             @default(now())
-  serverDeadline   DateTime
-  submittedAt      DateTime?
+  durationMinutes    Int
+  serverStartTime    DateTime             @default(now())
+  serverDeadline     DateTime
+  submittedAt        DateTime?
+  finalizationReason FinalizationReason?
 
   // Snapshot of marking configuration
-  correctMark      Float                @default(1.0)
-  negativeMark     Float                @default(0.25)
-  totalQuestions   Int
+  correctMark        Float                @default(1.0)
+  negativeMark       Float                @default(0.25)
+  totalQuestions     Int
+  attemptNumber      Int                  @default(1)
 
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
-  sessionQuestions ExamSessionQuestion[]
-  studentAnswers   StudentAnswer[]
-  result           ExamResult?
+  sessionQuestions   ExamSessionQuestion[]
+  studentAnswers     StudentAnswer[]
+  result             ExamResult?
+  auditEvents        ExamAuditEvent[]
 
   @@index([studentId, status])
+  @@index([examId, studentId])
 }
 
 model ExamSessionQuestion {
@@ -603,42 +795,89 @@ model ExamSessionQuestion {
 }
 
 model StudentAnswer {
-  id             String      @id @default(uuid())
-  sessionId      String
-  session        ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  questionId     String
-  question       Question    @relation(fields: [questionId], references: [id])
-  selectedOption String?     // "A", "B", "C", "D" or null
-  isCorrect      Boolean?
-  timeSpentSec   Int         @default(0)
-  savedAt        DateTime    @default(now())
+  id                String       @id @default(uuid())
+  sessionId         String
+  session           ExamSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId        String
+  question          Question     @relation(fields: [questionId], references: [id])
+  selectedOption    String?      // "A", "B", "C", "D" or null
+  writtenAnswer     String?      // For Short-Answer / CQ questions
+  isCorrect         Boolean?
+  marksObtained     Float?
+  timeSpentSec      Int          @default(0)
+  isMarkedForReview Boolean      @default(false)
+  savedAt           DateTime     @default(now())
+  manualGrade       ManualGrade?
 
   @@unique([sessionId, questionId])
 }
 
+model ManualGrade {
+  id             String        @id @default(uuid())
+  answerId       String        @unique
+  answer         StudentAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  graderId       String
+  grader         User          @relation("GraderUser", fields: [graderId], references: [id])
+  marksAwarded   Float
+  maxMarks       Float
+  rubricFeedback String?
+  gradedAt       DateTime      @default(now())
+  
+  reviewerId     String?
+  reviewer       User?         @relation("GraderReviewer", fields: [reviewerId], references: [id])
+  reviewedAt     DateTime?
+  reviewNotes    String?
+}
+
+model ExamAuditEvent {
+  id           String       @id @default(uuid())
+  examId       String?
+  exam         Exam?        @relation(fields: [examId], references: [id], onDelete: Cascade)
+  sessionId    String?
+  session      ExamSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User         @relation("AuditUser", fields: [userId], references: [id], onDelete: Cascade)
+  action       String
+  metadataJson String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime     @default(now())
+
+  @@index([examId, action])
+  @@index([sessionId, action])
+  @@index([userId, createdAt])
+}
+
 model ExamResult {
-  id              String      @id @default(uuid())
-  sessionId       String      @unique
-  session         ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  studentId       String
-  student         User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  id                   String      @id @default(uuid())
+  sessionId            String      @unique
+  session              ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId            String
+  student              User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
   
-  totalScore      Float
-  maxMarks        Float
-  correctCount    Int
-  incorrectCount  Int
-  unansweredCount Int
-  accuracyPct     Float
-  timeSpentSec    Int
+  totalScore           Float
+  maxMarks             Float
+  correctCount         Int
+  incorrectCount       Int
+  unansweredCount      Int
+  accuracyPct          Float
+  timeSpentSec         Int
   
-  rankInCohort    Int?
-  cohortSize      Int?
-  percentile      Float?
+  rankInCohort         Int?
+  cohortSize           Int?
+  percentile           Float?
+  isPassed             Boolean?
 
   subjectBreakdownJson String // JSON containing per-subject score and accuracy
   chapterBreakdownJson String // JSON containing per-chapter performance
+  sectionBreakdownJson String?
   
-  evaluatedAt     DateTime    @default(now())
+  isPublished          Boolean     @default(true)
+  regradedAt           DateTime?
+  regradeReason        String?
+  regradedBy           String?
+
+  evaluatedAt          DateTime    @default(now())
 
   @@index([studentId])
 }
@@ -1005,3 +1244,264 @@ model SiteSetting {
   description String?
   updatedAt   DateTime @updatedAt
 }
+
+// -------------------------------------------------------------------------
+// ACADEMIC ADMINISTRATION: TEACHER ASSIGNMENTS & STUDENT ENROLLMENTS
+// -------------------------------------------------------------------------
+
+model TeacherAssignment {
+  id             String         @id @default(uuid())
+  teacherId      String
+  teacher        User           @relation("TeacherAssignments", fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId      String
+  subject        Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  classId        String?
+  academicClass  AcademicClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  assignedById   String?
+  assignedBy     User?          @relation("TeacherAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  isActive       Boolean        @default(true)
+  notes          String?
+  assignedAt     DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([teacherId, subjectId])
+  @@index([teacherId, isActive])
+  @@index([subjectId])
+}
+
+model ClassEnrollment {
+  id             String           @id @default(uuid())
+  studentId      String
+  student        User             @relation("StudentClassEnrollments", fields: [studentId], references: [id], onDelete: Cascade)
+  classId        String
+  academicClass  AcademicClass    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  academicYear   String           @default("2025-2026")
+  rollNumber     String?
+  status         EnrollmentStatus @default(ACTIVE)
+  enrolledAt     DateTime         @default(now())
+  transferredAt  DateTime?
+  transferReason String?
+  notes          String?
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([studentId, classId, academicYear])
+  @@index([studentId, status])
+  @@index([classId, status])
+}
+
+// -------------------------------------------------------------------------
+// PDF IMPORT, TEXT EXTRACTION & AI QUESTION GENERATION ENGINE
+// -------------------------------------------------------------------------
+
+enum PdfImportStatus {
+  PENDING
+  QUEUED
+  EXTRACTING
+  RUNNING_OCR
+  READY
+  FAILED
+  CANCELLED
+}
+
+enum GenerationJobStatus {
+  PENDING
+  PREPARING_CONTEXT
+  GENERATING
+  VALIDATING
+  COMPLETED
+  FAILED
+}
+
+enum DraftQuestionStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  REJECTED
+  IMPORTED
+}
+
+enum AiQuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+  DESCRIPTIVE
+  FILL_IN_BLANK
+  MATCHING
+  ANALYTICAL
+  HIGHER_ORDER
+}
+
+model PdfImport {
+  id                String            @id @default(uuid())
+  fileName          String
+  fileSize          Int
+  mimeType          String            @default("application/pdf")
+  storagePath       String
+  fileHash          String
+  pageCount         Int               @default(0)
+  status            PdfImportStatus   @default(PENDING)
+  detectedLanguage  String?           @default("bn") // "bn", "en", "mixed"
+  category          ExamCategoryType?
+  classId           String?
+  academicClass     AcademicClass?    @relation(fields: [classId], references: [id], onDelete: SetNull)
+  subjectId         String?
+  subject           Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  chapterId         String?
+  chapter           Chapter?          @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  uploadedById      String
+  uploadedBy        User              @relation("UserPdfImports", fields: [uploadedById], references: [id], onDelete: Cascade)
+  errorMessage      String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  processingJobs    PdfProcessingJob[]
+  pages             ExtractedDocumentPage[]
+  textVersions      DocumentTextVersion[]
+  generationJobs    QuestionGenerationJob[]
+  generatedDrafts   GeneratedQuestionDraft[]
+  importedQuestions Question[]
+
+  @@index([uploadedById])
+  @@index([status])
+  @@index([fileHash])
+}
+
+model PdfProcessingJob {
+  id              String       @id @default(uuid())
+  pdfImportId     String
+  pdfImport       PdfImport    @relation(fields: [pdfImportId], references: [id], onDelete: Cascade)
+  stage           String       @default("QUEUED") // "QUEUED", "EXTRACTING", "RUNNING_OCR", "CLEANING", "COMPLETED", "FAILED"
+  progressPercent Int          @default(0)
+  currentPage     Int          @default(0)
+  totalPages      Int          @default(0)
+  status          String       @default("PROCESSING") // "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"
+  retryCount      Int          @default(0)
+  errorMessage    String?
+  logsJson        String?      @db.Text
+  startedAt       DateTime     @default(now())
+  completedAt     DateTime?
+
+  @@index([pdfImportId])
+}
+
+model ExtractedDocumentPage {
+  id               String       @id @default(uuid())
+  pdfImportId      String
+  pdfImport        PdfImport    @relation(fields: [pdfImportId], references: [id], onDelete: Cascade)
+  pageNumber       Int
+  rawText          String       @db.Text
+  cleanedText      String       @db.Text
+  hasOcr           Boolean      @default(false)
+  ocrConfidence    Float?
+  wordCount        Int          @default(0)
+  detectedLanguage String?      @default("bn")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([pdfImportId, pageNumber])
+  @@index([pdfImportId, pageNumber])
+}
+
+model DocumentTextVersion {
+  id            String       @id @default(uuid())
+  pdfImportId   String
+  pdfImport     PdfImport    @relation(fields: [pdfImportId], references: [id], onDelete: Cascade)
+  versionNumber Int          @default(1)
+  pageNumber    Int?         // null means full document
+  editedById    String?
+  editedBy      User?        @relation("UserTextEdits", fields: [editedById], references: [id], onDelete: SetNull)
+  content       String       @db.Text
+  diffSummary   String?
+  createdAt     DateTime     @default(now())
+
+  @@index([pdfImportId])
+}
+
+model QuestionGenerationJob {
+  id                String              @id @default(uuid())
+  pdfImportId       String
+  pdfImport         PdfImport           @relation(fields: [pdfImportId], references: [id], onDelete: Cascade)
+  requestedById     String
+  requestedBy       User                @relation("UserQuestionGenJobs", fields: [requestedById], references: [id], onDelete: Cascade)
+  status            GenerationJobStatus @default(PENDING)
+  requestedCount    Int                 @default(10)
+  generatedCount    Int                 @default(0)
+  approvedCount     Int                 @default(0)
+  rejectedCount     Int                 @default(0)
+  targetLanguage    String              @default("bn")
+  targetDifficulty  DifficultyLevel?
+  targetType        AiQuestionType?
+  modelUsed         String              @default("gemini-1.5-flash")
+  promptTokens      Int?
+  completionTokens  Int?
+  configJson        String?             @db.Text
+  errorMessage      String?
+  startedAt         DateTime            @default(now())
+  completedAt       DateTime?
+
+  drafts            GeneratedQuestionDraft[]
+
+  @@index([pdfImportId])
+  @@index([requestedById])
+}
+
+model GeneratedQuestionDraft {
+  id                  String               @id @default(uuid())
+  jobId               String?
+  job                 QuestionGenerationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  pdfImportId         String
+  pdfImport           PdfImport            @relation(fields: [pdfImportId], references: [id], onDelete: Cascade)
+  questionType        AiQuestionType       @default(MCQ)
+  difficulty          DifficultyLevel      @default(MEDIUM)
+  status              DraftQuestionStatus  @default(DRAFT)
+  questionTextBn      String               @db.Text
+  questionTextEn      String?              @db.Text
+  stemBn              String?              @db.Text
+  stemEn              String?              @db.Text
+  optionsJson         String?              @db.Text // JSON: [{ optionKey: "A", textBn: "...", textEn: "...", isCorrect: boolean }]
+  correctKey          String?              // "A", "B", "C", "D"
+  answerTextBn        String?              @db.Text
+  explanationBn       String               @db.Text
+  explanationEn       String?              @db.Text
+  markingRubric       String?              @db.Text // Step-by-step marking rubric for descriptive questions
+  marks               Float                @default(1.0)
+  negativeMarks       Float                @default(0.25)
+  estimatedSeconds    Int                  @default(60)
+  sourcePage          Int?
+  sourcePassage       String?              @db.Text
+  topicOrConcept      String?
+  category            ExamCategoryType
+  subjectId           String
+  subject             Subject              @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  chapterId           String
+  chapter             Chapter              @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  importedQuestionId  String?              @unique
+  importedQuestion    Question?            @relation(fields: [importedQuestionId], references: [id], onDelete: SetNull)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  reviewEvents        QuestionReviewEvent[]
+
+  @@index([pdfImportId, status])
+  @@index([jobId])
+  @@index([subjectId, chapterId])
+}
+
+model QuestionReviewEvent {
+  id              String                 @id @default(uuid())
+  draftId         String
+  draft           GeneratedQuestionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  reviewerId      String
+  reviewer        User                   @relation("UserQuestionReviewEvents", fields: [reviewerId], references: [id], onDelete: Cascade)
+  action          String                 // "EDIT", "APPROVE", "REJECT", "REGENERATE", "IMPORT"
+  previousStatus  String?
+  newStatus       String?
+  notes           String?
+  diffJson        String?                @db.Text
+  createdAt       DateTime               @default(now())
+
+  @@index([draftId])
+  @@index([reviewerId])
+}
+
+

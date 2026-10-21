@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
 import { MathText } from "@/components/ui/MathText";
@@ -13,6 +13,9 @@ import {
   RotateCcw,
   CheckCircle2,
   Bookmark,
+  Layers,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 
 interface QuestionOption {
@@ -24,12 +27,21 @@ interface QuestionOption {
 
 interface Question {
   id: string;
+  type?: string;
   questionTextBn: string;
   questionTextEn?: string | null;
   marks: number;
   options: QuestionOption[];
   subject: { nameBn: string; nameEn: string };
   chapter: { nameBn: string; nameEn: string; chapterNum: number };
+}
+
+interface ExamSection {
+  id: string;
+  titleBn: string;
+  titleEn: string;
+  durationMinutes?: number | null;
+  totalMarks?: number | null;
 }
 
 interface SessionData {
@@ -43,7 +55,19 @@ interface SessionData {
   negativeMark: number;
   totalQuestions: number;
   sessionQuestions: { orderIndex: number; question: Question }[];
-  studentAnswers: { questionId: string; selectedOption: string | null; timeSpentSec: number }[];
+  studentAnswers: {
+    questionId: string;
+    selectedOption: string | null;
+    writtenAnswer?: string | null;
+    isMarkedForReview?: boolean;
+    timeSpentSec: number;
+  }[];
+  exam?: {
+    id: string;
+    titleBn: string;
+    titleEn: string;
+    sections?: ExamSection[];
+  } | null;
 }
 
 export default function ExamSessionPage() {
@@ -54,12 +78,26 @@ export default function ExamSessionPage() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Answers & Reviews
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string | null>>({});
+  const [writtenAnswers, setWrittenAnswers] = useState<Record<string, string>>({});
   const [markedForReview, setMarkedForReview] = useState<Record<string, boolean>>({});
+
+  // Autosave status per question: 'idle' | 'saving' | 'saved' | 'failed'
+  const [saveStatus, setSaveStatus] = useState<Record<string, "idle" | "saving" | "saved" | "failed">>({});
+  const [globalSaveState, setGlobalSaveState] = useState<"saved" | "saving" | "failed">("saved");
+
+  // Sections
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+
+  // Timing & submission
   const [timeLeftSec, setTimeLeftSec] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [autoSavedNotice, setAutoSavedNotice] = useState(false);
+
+  // Debounce ref for written answers
+  const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Load session from server
   useEffect(() => {
@@ -78,14 +116,21 @@ export default function ExamSessionPage() {
           return;
         }
 
-        // Restore previously autosaved answers
+        // Restore previously autosaved answers & reviews
         const ansMap: Record<string, string | null> = {};
+        const writtenMap: Record<string, string> = {};
+        const reviewMap: Record<string, boolean> = {};
+
         if (s.studentAnswers) {
           s.studentAnswers.forEach((a) => {
-            ansMap[a.questionId] = a.selectedOption;
+            if (a.selectedOption) ansMap[a.questionId] = a.selectedOption;
+            if (a.writtenAnswer) writtenMap[a.questionId] = a.writtenAnswer;
+            if (a.isMarkedForReview) reviewMap[a.questionId] = true;
           });
         }
         setSelectedAnswers(ansMap);
+        setWrittenAnswers(writtenMap);
+        setMarkedForReview(reviewMap);
 
         // Calculate initial remaining seconds to server deadline
         const deadline = new Date(s.serverDeadline).getTime();
@@ -102,7 +147,7 @@ export default function ExamSessionPage() {
 
   // Submit exam handler
   const handleSubmitExam = useCallback(
-    async () => {
+    async (isTimeout = false) => {
       if (isSubmitting) return;
       setIsSubmitting(true);
       setShowConfirmModal(false);
@@ -112,6 +157,8 @@ export default function ExamSessionPage() {
       const answersPayload = session.sessionQuestions.map((sq) => ({
         questionId: sq.question.id,
         selectedOption: selectedAnswers[sq.question.id] ?? null,
+        writtenAnswer: writtenAnswers[sq.question.id] ?? null,
+        isMarkedForReview: Boolean(markedForReview[sq.question.id]),
         timeSpentSec: 10,
       }));
 
@@ -130,7 +177,7 @@ export default function ExamSessionPage() {
         setIsSubmitting(false);
       }
     },
-    [id, session, selectedAnswers, isSubmitting, router]
+    [id, session, selectedAnswers, writtenAnswers, markedForReview, isSubmitting, router]
   );
 
   // Synchronized countdown timer
@@ -141,8 +188,7 @@ export default function ExamSessionPage() {
       setTimeLeftSec((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          // Trigger auto-submit when server deadline is reached
-          handleSubmitExam();
+          handleSubmitExam(true);
           return 0;
         }
         return prev - 1;
@@ -152,33 +198,81 @@ export default function ExamSessionPage() {
     return () => clearInterval(timer);
   }, [session, timeLeftSec, handleSubmitExam]);
 
-  // Autosave answer handler
-  const handleSelectOption = async (questionId: string, optionKey: string) => {
-    const nextOption = selectedAnswers[questionId] === optionKey ? null : optionKey;
+  // Core save answer function
+  const persistAnswerToServer = async (
+    questionId: string,
+    optionKey: string | null,
+    writtenText?: string,
+    isReview?: boolean
+  ) => {
+    setSaveStatus((prev) => ({ ...prev, [questionId]: "saving" }));
+    setGlobalSaveState("saving");
 
-    // Optimistic UI update
-    setSelectedAnswers((prev) => ({
-      ...prev,
-      [questionId]: nextOption,
-    }));
-
-    setAutoSavedNotice(true);
-    setTimeout(() => setAutoSavedNotice(false), 1500);
-
-    // Persist to server
     try {
-      await fetch(`/api/v1/exams/${id}/answer`, {
+      const res = await fetch(`/api/v1/exams/${id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           questionId,
-          selectedOption: nextOption,
+          selectedOption: optionKey,
+          writtenAnswer: writtenText !== undefined ? writtenText : (writtenAnswers[questionId] || null),
+          isMarkedForReview: isReview !== undefined ? isReview : Boolean(markedForReview[questionId]),
           timeSpentSec: 5,
         }),
       });
+
+      if (!res.ok) throw new Error("Save failed");
+
+      setSaveStatus((prev) => ({ ...prev, [questionId]: "saved" }));
+      setGlobalSaveState("saved");
     } catch (err) {
       console.error("Autosave network error:", err);
+      setSaveStatus((prev) => ({ ...prev, [questionId]: "failed" }));
+      setGlobalSaveState("failed");
     }
+  };
+
+  // Option selection
+  const handleSelectOption = (questionId: string, optionKey: string) => {
+    const nextOption = selectedAnswers[questionId] === optionKey ? null : optionKey;
+    setSelectedAnswers((prev) => ({ ...prev, [questionId]: nextOption }));
+    persistAnswerToServer(questionId, nextOption);
+  };
+
+  // Written answer change with 600ms debounce
+  const handleWrittenChange = (questionId: string, text: string) => {
+    setWrittenAnswers((prev) => ({ ...prev, [questionId]: text }));
+    setSaveStatus((prev) => ({ ...prev, [questionId]: "saving" }));
+    setGlobalSaveState("saving");
+
+    if (debounceTimers.current[questionId]) {
+      clearTimeout(debounceTimers.current[questionId]);
+    }
+
+    debounceTimers.current[questionId] = setTimeout(() => {
+      persistAnswerToServer(questionId, selectedAnswers[questionId] || null, text);
+    }, 600);
+  };
+
+  // Mark for review toggle
+  const toggleMarkForReview = (questionId: string) => {
+    const nextVal = !markedForReview[questionId];
+    setMarkedForReview((prev) => ({ ...prev, [questionId]: nextVal }));
+    persistAnswerToServer(
+      questionId,
+      selectedAnswers[questionId] || null,
+      writtenAnswers[questionId],
+      nextVal
+    );
+  };
+
+  // Retry failed saves
+  const handleRetryFailed = () => {
+    Object.keys(saveStatus).forEach((qId) => {
+      if (saveStatus[qId] === "failed") {
+        persistAnswerToServer(qId, selectedAnswers[qId] || null, writtenAnswers[qId]);
+      }
+    });
   };
 
   if (loading) {
@@ -194,10 +288,10 @@ export default function ExamSessionPage() {
       <div className="max-w-xl mx-auto py-20 px-4 text-center space-y-4">
         <p className="text-slate-700 font-semibold">{t.common.empty}</p>
         <button
-          onClick={() => router.push("/exams/custom")}
+          onClick={() => router.push("/exams")}
           className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold"
         >
-          {locale === "bn" ? "নতুন পরীক্ষা শুরু করুন" : "Start New Exam"}
+          {locale === "bn" ? "পরীক্ষার তালিকায় ফিরুন" : "Back to Exams"}
         </button>
       </div>
     );
@@ -205,23 +299,24 @@ export default function ExamSessionPage() {
 
   const currentSq = session.sessionQuestions[currentIndex];
   const currentQuestion = currentSq.question;
-  const answeredCount = Object.values(selectedAnswers).filter(Boolean).length;
+  const isSubjective = currentQuestion.type === "CQ" || currentQuestion.options.length === 0;
+
+  const answeredCount = session.sessionQuestions.filter((sq) => {
+    const hasOption = Boolean(selectedAnswers[sq.question.id]);
+    const hasWritten = Boolean(writtenAnswers[sq.question.id]?.trim());
+    return hasOption || hasWritten;
+  }).length;
+
   const markedCount = Object.values(markedForReview).filter(Boolean).length;
   const totalQuestions = session.sessionQuestions.length;
   const isCurrentMarked = Boolean(markedForReview[currentQuestion.id]);
-
-  const toggleMarkForReview = (questionId: string) => {
-    setMarkedForReview((prev) => ({
-      ...prev,
-      [questionId]: !prev[questionId],
-    }));
-  };
+  const currentSaveStatus = saveStatus[currentQuestion.id] || "idle";
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-      {/* Top Persistent Bar: Timer & Progress */}
-      <div className="sticky top-16 z-40 bg-white/95 backdrop-blur-md p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap justify-between items-center gap-3">
-        {/* Progress Info */}
+      {/* Top Persistent Bar: Timer, Save Indicator, Progress */}
+      <div className="sticky top-16 z-40 bg-white/95 backdrop-blur-md p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap justify-between items-center gap-3">
+        {/* Progress & Save Status */}
         <div className="flex items-center gap-3 text-xs sm:text-sm">
           <span className="font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded-md">
             {t.exam.questionNumber} {currentIndex + 1} {t.exam.of} {totalQuestions}
@@ -234,12 +329,31 @@ export default function ExamSessionPage() {
               • {markedCount} {locale === "bn" ? "রিভিউ" : "Review"}
             </span>
           )}
-          {autoSavedNotice && (
-            <span className="text-emerald-600 text-xs flex items-center gap-1 animate-pulse">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{locale === "bn" ? "সংরক্ষিত" : "Autosaved"}</span>
-            </span>
-          )}
+
+          {/* Honest Autosave Indicator */}
+          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
+            {globalSaveState === "saving" ? (
+              <span className="text-amber-600 text-xs flex items-center gap-1 font-medium">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{locale === "bn" ? "সংরক্ষণ হচ্ছে..." : "Saving..."}</span>
+              </span>
+            ) : globalSaveState === "failed" ? (
+              <button
+                type="button"
+                onClick={handleRetryFailed}
+                className="text-rose-600 text-xs flex items-center gap-1 font-bold hover:underline cursor-pointer"
+                title="Click to retry"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>{locale === "bn" ? "সংরক্ষণে ত্রুটি! পুনরায় চেষ্টা" : "Save Failed! Retry"}</span>
+              </button>
+            ) : (
+              <span className="text-emerald-600 text-xs flex items-center gap-1 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{locale === "bn" ? "সংরক্ষিত" : "Saved"}</span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Server Authoritative Timer with Warning Color Transitions */}
@@ -253,7 +367,11 @@ export default function ExamSessionPage() {
                 : "bg-slate-50 text-slate-800 border-slate-200"
             }`}
           >
-            <Clock className={`w-4 h-4 ${timeLeftSec <= 120 ? "text-rose-600" : timeLeftSec <= 300 ? "text-amber-600" : "text-emerald-600"}`} />
+            <Clock
+              className={`w-4 h-4 ${
+                timeLeftSec <= 120 ? "text-rose-600" : timeLeftSec <= 300 ? "text-amber-600" : "text-emerald-600"
+              }`}
+            />
             <span>{formatTime(timeLeftSec)}</span>
           </div>
         )}
@@ -262,18 +380,39 @@ export default function ExamSessionPage() {
         <button
           onClick={() => setShowConfirmModal(true)}
           disabled={isSubmitting}
-          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
         >
           <Send className="w-3.5 h-3.5" />
-          <span>{t.exam.submitExam}</span>
+          <span>{isSubmitting ? "জমা হচ্ছে..." : t.exam.submitExam}</span>
         </button>
       </div>
+
+      {/* Sections Tab Bar (if section-based exam) */}
+      {session.exam?.sections && session.exam.sections.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {session.exam.sections.map((sec, idx) => (
+            <button
+              key={sec.id}
+              onClick={() => setActiveSectionId(sec.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+                activeSectionId === sec.id
+                  ? "bg-emerald-700 text-white shadow-sm"
+                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>{sec.titleBn}</span>
+              {sec.durationMinutes && <span className="opacity-75 font-normal">({sec.durationMinutes}m)</span>}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Main Examination Layout: Question Card & Palette */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Question Area (3 Cols) */}
         <div className="lg:col-span-3 space-y-6">
-          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
             {/* Meta & Mark for Review */}
             <div className="flex flex-wrap justify-between items-center text-xs text-slate-500 border-b border-slate-100 pb-3 gap-2">
               <div className="flex items-center gap-2">
@@ -281,6 +420,11 @@ export default function ExamSessionPage() {
                   {currentQuestion.subject.nameBn}
                 </span>
                 <span>{currentQuestion.chapter.nameBn}</span>
+                {currentQuestion.type && (
+                  <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
+                    {currentQuestion.type}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <button
@@ -292,7 +436,9 @@ export default function ExamSessionPage() {
                       : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                   }`}
                 >
-                  <Bookmark className={`w-3.5 h-3.5 ${isCurrentMarked ? "fill-purple-600 text-purple-600" : ""}`} />
+                  <Bookmark
+                    className={`w-3.5 h-3.5 ${isCurrentMarked ? "fill-purple-600 text-purple-600" : ""}`}
+                  />
                   <span>{t.exam.markedForReview}</span>
                 </button>
                 <span className="text-slate-400">
@@ -306,36 +452,54 @@ export default function ExamSessionPage() {
               <MathText text={currentQuestion.questionTextBn} />
             </div>
 
-            {/* Options */}
-            <div className="space-y-3 pt-2">
-              {currentQuestion.options.map((opt) => {
-                const isSelected = selectedAnswers[currentQuestion.id] === opt.optionKey;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => handleSelectOption(currentQuestion.id, opt.optionKey)}
-                    className={`w-full p-4 rounded-xl border text-left flex items-center gap-4 transition cursor-pointer ${
-                      isSelected
-                        ? "border-emerald-600 bg-emerald-50/80 text-emerald-950 font-bold shadow-xs"
-                        : "border-slate-200 bg-white hover:bg-slate-50 text-slate-800"
-                    }`}
-                  >
-                    <span
-                      className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 transition ${
+            {/* Answer Options or Subjective Textarea */}
+            {!isSubjective ? (
+              <div className="space-y-3 pt-2">
+                {currentQuestion.options.map((opt) => {
+                  const isSelected = selectedAnswers[currentQuestion.id] === opt.optionKey;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => handleSelectOption(currentQuestion.id, opt.optionKey)}
+                      className={`w-full p-4 rounded-xl border text-left flex items-center gap-4 transition cursor-pointer ${
                         isSelected
-                          ? "bg-emerald-600 text-white"
-                          : "bg-slate-100 border border-slate-300 text-slate-700"
+                          ? "border-emerald-600 bg-emerald-50/80 text-emerald-950 font-bold shadow-sm"
+                          : "border-slate-200 bg-white hover:bg-slate-50 text-slate-800"
                       }`}
                     >
-                      {opt.optionKey}
-                    </span>
-                    <div className="text-sm sm:text-base leading-relaxed">
-                      <MathText text={opt.textBn} />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                      <span
+                        className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 transition ${
+                          isSelected
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-100 border border-slate-300 text-slate-700"
+                        }`}
+                      >
+                        {opt.optionKey}
+                      </span>
+                      <div className="text-sm sm:text-base leading-relaxed">
+                        <MathText text={opt.textBn} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="space-y-2 pt-2">
+                <label className="block text-xs font-bold uppercase text-slate-700">
+                  আপনার লিখিত উত্তর এখানে টাইপ করুন (Written Response):
+                </label>
+                <textarea
+                  rows={6}
+                  value={writtenAnswers[currentQuestion.id] || ""}
+                  onChange={(e) => handleWrittenChange(currentQuestion.id, e.target.value)}
+                  placeholder="উত্তরের বিবরণ ও সমীকরণ লিখুন..."
+                  className="w-full p-4 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none font-sans leading-relaxed"
+                />
+                <p className="text-xs text-slate-400 italic">
+                  * পরিবর্তন স্বয়ংক্রিয়ভাবে সার্ভারে সেভ হচ্ছে।
+                </p>
+              </div>
+            )}
 
             {/* Bottom Question Controls */}
             <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
@@ -348,7 +512,7 @@ export default function ExamSessionPage() {
                 <span>{t.exam.prev}</span>
               </button>
 
-              {selectedAnswers[currentQuestion.id] && (
+              {selectedAnswers[currentQuestion.id] && !isSubjective && (
                 <button
                   onClick={() => handleSelectOption(currentQuestion.id, selectedAnswers[currentQuestion.id]!)}
                   className="text-xs text-slate-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer"
@@ -372,7 +536,7 @@ export default function ExamSessionPage() {
 
         {/* Question Navigation Palette (1 Col) */}
         <div className="lg:col-span-1 space-y-4">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
               {locale === "bn" ? "প্রশ্ন প্যালেট (Jump to)" : "Question Palette"}
             </h3>
@@ -380,7 +544,9 @@ export default function ExamSessionPage() {
             <div className="grid grid-cols-5 gap-1.5">
               {session.sessionQuestions.map((sq, idx) => {
                 const isCurrent = idx === currentIndex;
-                const isAnswered = Boolean(selectedAnswers[sq.question.id]);
+                const isAnswered =
+                  Boolean(selectedAnswers[sq.question.id]) ||
+                  Boolean(writtenAnswers[sq.question.id]?.trim());
                 const isMarked = Boolean(markedForReview[sq.question.id]);
 
                 let btnStyle = "bg-slate-100 text-slate-600 hover:bg-slate-200";
@@ -428,7 +594,7 @@ export default function ExamSessionPage() {
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
             <div className="flex items-center gap-3 text-amber-600">
               <AlertTriangle className="w-6 h-6" />

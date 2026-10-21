@@ -101,10 +101,25 @@ async function main() {
       update: {},
       create: c,
     });
-  }
   console.log("✓ Academic classes (SSC & HSC) seeded");
 
-  // 3. Examination Boards
+  // 2.6 Academic Groups (Science, Commerce, Humanities, General, Vocational)
+  const groupData = [
+    { code: "SCIENCE", nameEn: "Science", nameBn: "বিজ্ঞান বিভাগ", orderIndex: 1 },
+    { code: "COMMERCE", nameEn: "Business Studies", nameBn: "ব্যবসায় শিক্ষা বিভাগ", orderIndex: 2 },
+    { code: "HUMANITIES", nameEn: "Humanities", nameBn: "মানবিক বিভাগ", orderIndex: 3 },
+    { code: "GENERAL", nameEn: "General / Common", nameBn: "সাধারণ বিষয়সমূহ", orderIndex: 4 },
+    { code: "VOCATIONAL", nameEn: "Vocational", nameBn: "কারিগরি ও ভোকেশনাল", orderIndex: 5 },
+  ];
+
+  for (const g of groupData) {
+    await prisma.academicGroup.upsert({
+      where: { code: g.code },
+      update: {},
+      create: g,
+    });
+  }
+  console.log("✓ Academic groups seeded");
   const boardsData = [
     { code: "DHA", nameEn: "Dhaka Board", nameBn: "ঢাকা শিক্ষা বোর্ড" },
     { code: "RAJ", nameEn: "Rajshahi Board", nameBn: "রাজশাহী শিক্ষা বোর্ড" },

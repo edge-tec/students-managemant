@@ -2,6 +2,7 @@
 
 import React, { useMemo } from "react";
 import katex from "katex";
+import { TextCleanerService } from "@/lib/pdf/textCleaner";
 
 interface MathTextProps {
   text?: string | null;
@@ -9,29 +10,33 @@ interface MathTextProps {
 }
 
 export function MathText({ text, className = "" }: MathTextProps) {
-  // Render LaTeX formulas where detected
+  // Render LaTeX formulas and clean HTML entities where detected
   const renderedContent = useMemo(() => {
     if (!text) return null;
+
+    // Decode any lingering HTML entities (e.g. &#xA0;, &#986;, &nbsp;)
+    const sanitizedText = TextCleanerService.decodeHtmlEntities(text);
+
     // Check if the text contains LaTeX delimiters or standard math commands
     const hasLatex =
-      text.includes("$") ||
-      text.includes("\\(") ||
-      text.includes("\\[") ||
-      text.includes("\\vec") ||
-      text.includes("\\frac") ||
-      text.includes("\\sin") ||
-      text.includes("\\cos") ||
-      text.includes("\\theta") ||
-      text.includes("\\times") ||
-      text.includes("\\cdot");
+      sanitizedText.includes("$") ||
+      sanitizedText.includes("\\(") ||
+      sanitizedText.includes("\\[") ||
+      sanitizedText.includes("\\vec") ||
+      sanitizedText.includes("\\frac") ||
+      sanitizedText.includes("\\sin") ||
+      sanitizedText.includes("\\cos") ||
+      sanitizedText.includes("\\theta") ||
+      sanitizedText.includes("\\times") ||
+      sanitizedText.includes("\\cdot");
 
     if (!hasLatex) {
-      return <span>{text}</span>;
+      return <span>{sanitizedText}</span>;
     }
 
     // Split text into tokens and render LaTeX segments
     // Regex matches $...$ or \(...\) or fallback to formula tokens
-    const parts = text.split(/(\$[^$]+\$|\\\([^\\]+\\\))/g);
+    const parts = sanitizedText.split(/(\$[^$]+\$|\\\([^\\]+\\\))/g);
 
     return (
       <span className={className}>

@@ -7,6 +7,7 @@ describe("Curriculum Management Integration Tests", () => {
   const testClassCode = "TEST_CLASS_10";
   const testSubjectCode = "TEST_CHEM_1";
   const testBoardCode = "TEST_BOG";
+  const testGroupCode = "TEST_GRP_1";
 
   afterAll(async () => {
     // Cleanup any created test entities safely
@@ -27,6 +28,9 @@ describe("Curriculum Management Integration Tests", () => {
     });
     await prisma.subject.deleteMany({
       where: { code: testSubjectCode },
+    });
+    await prisma.academicGroup.deleteMany({
+      where: { code: testGroupCode },
     });
     await prisma.academicClass.deleteMany({
       where: { code: testClassCode },
@@ -125,5 +129,74 @@ describe("Curriculum Management Integration Tests", () => {
 
     const boards = await CurriculumService.listBoards(false);
     expect(boards.some((b) => b.code === testBoardCode)).toBe(true);
+  });
+
+  it("should create, list, and update academic groups", async () => {
+    const group = await CurriculumService.createGroup({
+      code: testGroupCode,
+      nameBn: "কারিগরি শাখা (টেস্ট)",
+      nameEn: "Vocational Stream (Test)",
+      orderIndex: 5,
+    });
+    expect(group).toBeDefined();
+    expect(group.code).toBe(testGroupCode);
+    expect(group.nameBn).toBe("কারিগরি শাখা (টেস্ট)");
+
+    const allGroups = await CurriculumService.listGroups(false);
+    const found = allGroups.find((g) => g.code === testGroupCode);
+    expect(found).toBeDefined();
+
+    const updated = await CurriculumService.updateGroup(group.id, {
+      nameEn: "Vocational Stream Updated",
+      isActive: false,
+    });
+    expect(updated.nameEn).toBe("Vocational Stream Updated");
+    expect(updated.isActive).toBe(false);
+
+    // Re-activate
+    await CurriculumService.updateGroup(group.id, { isActive: true });
+  });
+
+  it("should link subject with academic group and prevent deleting group with linked subjects", async () => {
+    const group = await prisma.academicGroup.findUnique({ where: { code: testGroupCode } });
+    expect(group).toBeDefined();
+
+    const subject = await prisma.subject.findFirst({ where: { code: testSubjectCode } });
+    expect(subject).toBeDefined();
+
+    // Link subject to the group
+    const updatedSubject = await CurriculumService.updateSubject(subject!.id, {
+      groupId: group!.id,
+    });
+    expect(updatedSubject.groupId).toBe(group!.id);
+
+    // Group safe deletion guard must trigger
+    await expect(CurriculumService.deleteGroup(group!.id)).rejects.toThrow(
+      /Cannot delete group:.*subject\(s\) are linked to it/
+    );
+
+    // Unlink subject from group
+    await CurriculumService.updateSubject(subject!.id, { groupId: null });
+
+    // Now deleting the group should succeed
+    const deletedGroup = await CurriculumService.deleteGroup(group!.id);
+    expect(deletedGroup.id).toBe(group!.id);
+  });
+
+  it("should update class and enforce safe deletion guard when subjects are assigned", async () => {
+    const cls = await prisma.academicClass.findUnique({ where: { code: testClassCode } });
+    expect(cls).toBeDefined();
+
+    // Update class details
+    const updatedClass = await CurriculumService.updateClass(cls!.id, {
+      nameBn: "দশম শ্রেণি (হালনাগাদ)",
+      nameEn: "Class 10 (Updated)",
+    });
+    expect(updatedClass.nameBn).toBe("দশম শ্রেণি (হালনাগাদ)");
+
+    // Safe deletion guard must trigger because testSubjectCode is assigned to it
+    await expect(CurriculumService.deleteClass(cls!.id)).rejects.toThrow(
+      /Cannot delete class:.*subject\(s\) are linked to it/
+    );
   });
 });

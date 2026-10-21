@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { ExamService } from "@/lib/exams/examService";
-import { ExamCategoryType } from "@prisma/client";
+import { ExamCategoryType, ExamStatus } from "@prisma/client";
+import { prisma } from "@/lib/db/prisma";
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,8 +23,24 @@ export async function GET(req: NextRequest) {
       ? await ExamService.getStudentExamHistory(user.id, 10)
       : [];
 
+    const publishedExams = await prisma.exam.findMany({
+      where: {
+        status: { in: [ExamStatus.PUBLISHED, ExamStatus.SCHEDULED] },
+        ...(category ? { category } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      include: {
+        subject: { select: { nameBn: true, nameEn: true } },
+        academicClass: { select: { nameBn: true, nameEn: true } },
+        sections: { select: { id: true, titleBn: true, titleEn: true } },
+        _count: { select: { examQuestions: true, sessions: true } },
+      },
+    });
+
     return NextResponse.json({
       templates,
+      exams: publishedExams,
       history,
     });
   } catch (error: unknown) {

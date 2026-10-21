@@ -7,6 +7,9 @@ import {
   ReportReason,
   ReportStatus,
 } from "@prisma/client";
+import { AuditService } from "@/lib/audit/auditService";
+import { CurriculumService } from "@/lib/curriculum/curriculumService";
+import { EmailService } from "@/lib/email/emailService";
 
 export interface CreateQuestionInput {
   category: ExamCategoryType;
@@ -99,6 +102,31 @@ export class QuestionService {
     if (input.type === QuestionType.CQ) {
       if (!input.subparts || input.subparts.length === 0) {
         throw new Error("Creative Questions (CQ) require subparts (e.g. ক, খ, গ, ঘ).");
+      }
+    }
+
+    // Enforce teacher assignment scope if author is a teacher with configured assignments
+    if (authorId) {
+      const authorRoles = await prisma.userRole.findMany({
+        where: { userId: authorId },
+        include: { role: true },
+      });
+      const isTeacher = authorRoles.some((ur) => ur.role.name === "TEACHER");
+      const isStaff = authorRoles.some((ur) =>
+        ["SUPER_ADMIN", "ADMIN", "CONTENT_MANAGER"].includes(ur.role.name)
+      );
+      if (isTeacher && !isStaff) {
+        const totalAssignments = await prisma.teacherAssignment.count({
+          where: { teacherId: authorId, isActive: true },
+        });
+        if (totalAssignments > 0) {
+          const hasSubjectAssignment = await prisma.teacherAssignment.findFirst({
+            where: { teacherId: authorId, subjectId: input.subjectId, isActive: true },
+          });
+          if (!hasSubjectAssignment) {
+            throw new Error("Access Denied: Teacher is not assigned to this subject.");
+          }
+        }
       }
     }
 
@@ -228,6 +256,32 @@ export class QuestionService {
       throw new Error("Question not found");
     }
 
+    // Enforce teacher assignment scope if changed by a teacher with configured assignments
+    if (changedById) {
+      const authorRoles = await prisma.userRole.findMany({
+        where: { userId: changedById },
+        include: { role: true },
+      });
+      const isTeacher = authorRoles.some((ur) => ur.role.name === "TEACHER");
+      const isStaff = authorRoles.some((ur) =>
+        ["SUPER_ADMIN", "ADMIN", "CONTENT_MANAGER"].includes(ur.role.name)
+      );
+      if (isTeacher && !isStaff) {
+        const totalAssignments = await prisma.teacherAssignment.count({
+          where: { teacherId: changedById, isActive: true },
+        });
+        if (totalAssignments > 0) {
+          const targetSubjectId = input.subjectId || existing.subjectId;
+          const hasSubjectAssignment = await prisma.teacherAssignment.findFirst({
+            where: { teacherId: changedById, subjectId: targetSubjectId, isActive: true },
+          });
+          if (!hasSubjectAssignment) {
+            throw new Error("Access Denied: Teacher is not assigned to this subject.");
+          }
+        }
+      }
+    }
+
     return prisma.$transaction(async (tx) => {
       // 1. Update main question fields
       const updated = await tx.question.update({
@@ -333,6 +387,7 @@ export class QuestionService {
 
   /**
    * Updates question status (DRAFT -> REVIEW -> APPROVED -> PUBLISHED -> ARCHIVED)
+   * with strict separation of duties, quality validation, and audit logging.
    */
   static async updateStatus(
     id: string,
@@ -340,7 +395,45 @@ export class QuestionService {
     reviewerId: string,
     comments?: string
   ) {
-    return prisma.$transaction(async (tx) => {
+    const existing = await prisma.question.findUnique({
+      where: { id },
+      include: {
+        options: true,
+        answer: true,
+        subparts: true,
+      },
+    });
+
+    if (!existing) {
+      throw new Error("Question not found");
+    }
+
+    // Separation of duties check: Authors cannot approve or publish their own questions
+    if (
+      existing.authorId &&
+      existing.authorId === reviewerId &&
+      (status === ContentStatus.APPROVED || status === ContentStatus.PUBLISHED)
+    ) {
+      throw new Error("Separation of duties: Authors cannot approve or publish their own questions.");
+    }
+
+    // Publication quality validation
+    if (status === ContentStatus.PUBLISHED) {
+      if (!existing.questionTextBn && !existing.stemBn) {
+        throw new Error("Cannot publish question without Bengali text content.");
+      }
+      if (existing.type === QuestionType.MCQ) {
+        if (!existing.options || existing.options.length < 2) {
+          throw new Error("Cannot publish MCQ question with fewer than 2 options.");
+        }
+        const hasCorrect = existing.options.some((o) => o.isCorrect);
+        if (!hasCorrect && !existing.answer?.correctKey) {
+          throw new Error("Cannot publish MCQ question without at least one marked correct option.");
+        }
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
       const question = await tx.question.update({
         where: { id },
         data: { status },
@@ -359,13 +452,27 @@ export class QuestionService {
         data: {
           questionId: id,
           changedBy: reviewerId,
-          diffJson: JSON.stringify({ action: "STATUS_CHANGE", newStatus: status, comments }),
+          diffJson: JSON.stringify({ action: "STATUS_CHANGE", previousStatus: existing.status, newStatus: status, comments }),
           reason: comments || `Status updated to ${status}`,
         },
       });
 
       return question;
     });
+
+    await AuditService.log({
+      userId: reviewerId,
+      action: `QUESTION_${status}`,
+      resource: "Question",
+      resourceId: id,
+      details: {
+        previousStatus: existing.status,
+        newStatus: status,
+        comments,
+      },
+    });
+
+    return updated;
   }
 
   /**
@@ -599,6 +706,180 @@ export class QuestionService {
         status: ReportStatus.PENDING,
       },
     });
+  }
+
+  /**
+   * List reported questions with filtering, search and pagination for admin/reviewers
+   */
+  static async listQuestionReports(params: {
+    status?: ReportStatus;
+    reason?: ReportReason;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, params.page || 1);
+    const limit = Math.min(50, Math.max(1, params.limit || 15));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (params.status) {
+      where.status = params.status;
+    }
+    if (params.reason) {
+      where.reason = params.reason;
+    }
+    if (params.search && params.search.trim()) {
+      const q = params.search.trim();
+      where.OR = [
+        { description: { contains: q, mode: "insensitive" } },
+        { adminNotes: { contains: q, mode: "insensitive" } },
+        {
+          question: {
+            OR: [
+              { questionTextBn: { contains: q, mode: "insensitive" } },
+              { questionTextEn: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        },
+        {
+          user: {
+            OR: [
+              { email: { contains: q, mode: "insensitive" } },
+              { fullName: { contains: q, mode: "insensitive" } },
+              { phoneNumber: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    const [reports, totalCount, pendingCount] = await Promise.all([
+      prisma.questionReport.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phoneNumber: true,
+            },
+          },
+          question: {
+            include: {
+              subject: { select: { id: true, nameBn: true, nameEn: true, code: true } },
+              chapter: { select: { id: true, nameBn: true, chapterNum: true } },
+              options: { select: { optionKey: true, textBn: true, textEn: true, isCorrect: true } },
+              answer: { select: { correctKey: true, explanationBn: true, explanationEn: true } },
+              subparts: { select: { partLabel: true, questionTextBn: true, marks: true, solutionBn: true } },
+            },
+          },
+        },
+      }),
+      prisma.questionReport.count({ where }),
+      prisma.questionReport.count({ where: { status: ReportStatus.PENDING } }),
+    ]);
+
+    return {
+      reports,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit) || 1,
+        pendingCount,
+      },
+    };
+  }
+
+  /**
+   * Resolve or update status of a question report with reviewer notes and audit trail
+   */
+  static async resolveQuestionReport(
+    reportId: string,
+    status: ReportStatus,
+    adminNotes: string | null | undefined,
+    reviewerId: string,
+    ipAddress?: string
+  ) {
+    const existing = await prisma.questionReport.findUnique({
+      where: { id: reportId },
+      include: {
+        question: { select: { id: true, questionTextBn: true } },
+      },
+    });
+
+    if (!existing) {
+      throw new Error("Question report not found");
+    }
+
+    const updated = await prisma.questionReport.update({
+      where: { id: reportId },
+      data: {
+        status,
+        adminNotes: adminNotes !== undefined ? adminNotes : existing.adminNotes,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phoneNumber: true,
+          },
+        },
+        question: {
+          include: {
+            subject: { select: { id: true, nameBn: true, nameEn: true, code: true } },
+            chapter: { select: { id: true, nameBn: true, chapterNum: true } },
+            options: { select: { optionKey: true, textBn: true, textEn: true, isCorrect: true } },
+            answer: { select: { correctKey: true, explanationBn: true } },
+          },
+        },
+      },
+    });
+
+    await AuditService.log({
+      userId: reviewerId,
+      action: "QUESTION_REPORT_RESOLVED",
+      resource: "QuestionReport",
+      resourceId: reportId,
+      details: {
+        previousStatus: existing.status,
+        newStatus: status,
+        adminNotes: adminNotes || null,
+        questionId: existing.questionId,
+      },
+      ipAddress,
+    });
+
+    // Notify student via email if account has an email address
+    if (updated.user?.email && (status === ReportStatus.RESOLVED || status === ReportStatus.DISMISSED)) {
+      const reasonLabel = {
+        WRONG_ANSWER: "ভুল উত্তর (Wrong Answer)",
+        TYPO_OR_GRAMMAR: "টাইপো / ব্যাকরণগত ভুল (Typo)",
+        INCOMPLETE_QUESTION: "অসম্পূর্ণ প্রশ্ন (Incomplete Question)",
+        IMAGE_OR_FORMULA_BROKEN: "চিত্র বা সূত্র অস্পষ্ট (Broken Media/Formula)",
+        OUT_OF_SYLLABUS: "সিলেবাস বহির্ভূত (Out of Syllabus)",
+        OTHER: "অন্যান্য সমস্যা (Other Issue)",
+      }[updated.reason] || updated.reason;
+
+      await EmailService.sendQuestionReportResolvedEmail(
+        updated.user.email,
+        updated.user.fullName || "শিক্ষার্থী",
+        updated.question?.questionTextBn || "প্রশ্ন",
+        reasonLabel,
+        adminNotes
+      ).catch((err) => {
+        console.error("Failed to dispatch report resolution email:", err);
+      });
+    }
+
+    return updated;
   }
 
   /**

@@ -21,15 +21,17 @@ export async function POST(
       return NextResponse.json({ error: "Validation failed", details: parsed.error.format() }, { status: 400 });
     }
 
-    const { questionId, selectedOption, timeSpentSec } = parsed.data;
+    const { questionId, selectedOption, writtenAnswer, isMarkedForReview, timeSpentSec } = parsed.data;
 
-    const answer = await ExamService.saveAnswer(
-      id,
-      user.id,
+    const answer = await ExamService.saveAnswer({
+      sessionId: id,
+      studentId: user.id,
       questionId,
       selectedOption,
-      timeSpentSec
-    );
+      writtenAnswer,
+      isMarkedForReview,
+      timeSpentSec,
+    });
 
     return NextResponse.json({ success: true, answer });
   } catch (error: unknown) {
