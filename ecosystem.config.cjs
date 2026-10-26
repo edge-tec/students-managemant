@@ -1,11 +1,12 @@
 const path = require("path");
 
 const port = process.env.PORT || "3005";
+const appName = process.env.APP_NAME || process.env.DOMAIN || "m.eliteali.com";
 
 module.exports = {
   apps: [
     {
-      name: "m.eliteali.com",
+      name: appName,
       script: path.join(__dirname, "start.js"),
       cwd: __dirname,
       instances: 1,

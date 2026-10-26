@@ -66,31 +66,46 @@ echo "[7/7] Freeing ports (3005, 3006) and restarting PM2 daemon on port ${TARGE
 # Ensure PM2 is installed
 command -v pm2 >/dev/null 2>&1 || npm install -g pm2
 
-# Kill any orphaned processes holding port 3005 or 3006
+# Kill any orphaned processes holding the target port or default ports
+fuser -k "${TARGET_PORT}/tcp" 2>/dev/null || true
 fuser -k 3005/tcp 2>/dev/null || true
 fuser -k 3006/tcp 2>/dev/null || true
+lsof -ti:"${TARGET_PORT}" | xargs kill -9 2>/dev/null || true
 lsof -ti:3005 | xargs kill -9 2>/dev/null || true
 lsof -ti:3006 | xargs kill -9 2>/dev/null || true
-kill -9 $(netstat -tlpn 2>/dev/null | grep -E ':3005|:3006' | awk '{print $7}' | cut -d/ -f1) 2>/dev/null || true
+kill -9 $(netstat -tlpn 2>/dev/null | grep -E ":${TARGET_PORT}|:3005|:3006" | awk '{print $7}' | cut -d/ -f1) 2>/dev/null || true
 
 pm2 delete "${DOMAIN}" 2>/dev/null || true
-PORT="${TARGET_PORT}" pm2 start ecosystem.config.cjs --update-env
+APP_NAME="${DOMAIN}" DOMAIN="${DOMAIN}" PORT="${TARGET_PORT}" pm2 start ecosystem.config.cjs --update-env
 pm2 save
+pm2 startup systemd -u root --hp /root 2>/dev/null || pm2 startup 2>/dev/null || true
 
 echo "=========================================================="
 echo " Checking service health on port ${TARGET_PORT}..."
-sleep 3
-if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${TARGET_PORT} | grep -q "200\|307\|308\|404"; then
-    echo " SUCCESS: Application is running and responding on http://127.0.0.1:${TARGET_PORT}!"
+HEALTHY=false
+for attempt in 1 2 3 4 5; do
+    sleep 2
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${TARGET_PORT} || echo "000")
+    if echo "$HTTP_STATUS" | grep -q "200\|307\|308\|404"; then
+        HEALTHY=true
+        echo " ✓ Attempt $attempt: SUCCESS: Application is running and responding (HTTP $HTTP_STATUS)!"
+        break
+    else
+        echo " ... Attempt $attempt: waiting for Next.js to finish binding (HTTP $HTTP_STATUS)..."
+    fi
+done
+
+if [ "$HEALTHY" = true ]; then
+    echo "=========================================================="
+    echo " UPDATE COMPLETE!"
+    echo " Portal:      https://${DOMAIN}/login"
+    echo " Admin Login: https://${DOMAIN}/admin/login"
+    echo " Credentials: admin@eliteali.com / edge2129"
+    echo "=========================================================="
 else
     echo "⚠️ Notice: Checking PM2 process status..."
     pm2 status
-    echo "--- Last 20 lines of PM2 log: ---"
-    pm2 logs "${DOMAIN}" --lines 20 --nostream || true
+    echo "--- Last 25 lines of PM2 log: ---"
+    pm2 logs "${DOMAIN}" --lines 25 --nostream || true
+    echo "=========================================================="
 fi
-echo "=========================================================="
-echo " UPDATE COMPLETE!"
-echo " Portal:      https://${DOMAIN}/login"
-echo " Admin Login: https://${DOMAIN}/admin/login"
-echo " Credentials: admin@eliteali.com / edge2129"
-echo "=========================================================="
